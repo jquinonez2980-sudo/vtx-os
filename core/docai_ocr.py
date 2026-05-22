@@ -5,6 +5,10 @@ Document AI OCR wrapper.
 Processor ID is read from Secret Manager as 'vtx-docai-processor-id'.
 Location: us  |  Project: vtx-accounting-os-prod
 
+Routing:
+    < 5 MB  → synchronous process_document  (low latency, 300 s limit)
+    ≥ 5 MB  → async batch_process_documents via GCS (no size/time cap)
+
 Usage (instance):
     from core.docai_ocr import DocAIOCR
     ocr  = DocAIOCR()
@@ -25,6 +29,11 @@ DOCAI_LOCATION   = "us"
 DOCAI_PROJECT    = os.environ.get("GOOGLE_CLOUD_PROJECT", "vtx-accounting-os-prod")
 PROCESSOR_SECRET = "vtx-docai-processor-id"
 
+_GCS_BUCKET      = "vtx-accounting-os-prod-vtx-exports"
+_SYNC_LIMIT      = 5 * 1024 * 1024   # 5 MB — sync below this
+_SYNC_TIMEOUT    = 300.0              # seconds
+_BATCH_TIMEOUT   = 900               # seconds — LRO wait ceiling
+
 
 class DocAIOCR:
     """Document AI OCR processor. Credentials and processor name are lazily resolved."""
@@ -38,9 +47,21 @@ class DocAIOCR:
     # ------------------------------------------------------------------
 
     def ocr_pdf_bytes(self, pdf_bytes: bytes) -> str:
-        """Run Document AI OCR on raw PDF bytes. Returns the full extracted text."""
-        from google.cloud import documentai
+        """OCR raw PDF bytes. Routes to sync or batch based on size."""
+        if len(pdf_bytes) >= _SYNC_LIMIT:
+            return self._ocr_batch(pdf_bytes)
+        return self._ocr_sync(pdf_bytes)
 
+    def ocr_pdf_file(self, path: str | Path) -> str:
+        """Read a PDF from disk and OCR it."""
+        return self.ocr_pdf_bytes(Path(path).read_bytes())
+
+    # ------------------------------------------------------------------
+    # Sync path (< 5 MB)
+    # ------------------------------------------------------------------
+
+    def _ocr_sync(self, pdf_bytes: bytes) -> str:
+        from google.cloud import documentai
         request = documentai.ProcessRequest(
             name=self._get_processor_name(),
             raw_document=documentai.RawDocument(
@@ -48,12 +69,90 @@ class DocAIOCR:
                 mime_type="application/pdf",
             ),
         )
-        result = self._get_client().process_document(request=request, timeout=900.0)
+        result = self._get_client().process_document(
+            request=request, timeout=_SYNC_TIMEOUT
+        )
         return result.document.text
 
-    def ocr_pdf_file(self, path: str | Path) -> str:
-        """Read a PDF from disk and run OCR. Returns the full extracted text."""
-        return self.ocr_pdf_bytes(Path(path).read_bytes())
+    # ------------------------------------------------------------------
+    # Batch/async path (≥ 5 MB)
+    # ------------------------------------------------------------------
+
+    def _ocr_batch(self, pdf_bytes: bytes) -> str:
+        import json
+        import uuid
+        from google.cloud import documentai
+        from google.cloud import storage as gcs_storage
+
+        run_id          = str(uuid.uuid4())
+        input_blob_name = f"docai-tmp/{run_id}/input.pdf"
+        output_prefix   = f"docai-tmp/{run_id}/output/"
+        gcs_input_uri   = f"gs://{_GCS_BUCKET}/{input_blob_name}"
+        gcs_output_uri  = f"gs://{_GCS_BUCKET}/{output_prefix}"
+
+        storage_client = gcs_storage.Client(project=DOCAI_PROJECT)
+        bucket = storage_client.bucket(_GCS_BUCKET)
+
+        # 1 — Upload PDF to a temporary GCS location.
+        # Use upload_from_file (resumable for > 8 MB) with a generous timeout.
+        import io
+        bucket.blob(input_blob_name).upload_from_file(
+            io.BytesIO(pdf_bytes),
+            content_type="application/pdf",
+            size=len(pdf_bytes),
+            timeout=600,
+        )
+
+        try:
+            # 2 — Kick off the batch job
+            operation = self._get_client().batch_process_documents(
+                request=documentai.BatchProcessRequest(
+                    name=self._get_processor_name(),
+                    input_documents=documentai.BatchDocumentsInputConfig(
+                        gcs_documents=documentai.GcsDocuments(
+                            documents=[documentai.GcsDocument(
+                                gcs_uri=gcs_input_uri,
+                                mime_type="application/pdf",
+                            )]
+                        )
+                    ),
+                    document_output_config=documentai.DocumentOutputConfig(
+                        gcs_output_config=documentai.DocumentOutputConfig.GcsOutputConfig(
+                            gcs_uri=gcs_output_uri,
+                        )
+                    ),
+                )
+            )
+
+            # 3 — Wait for LRO completion
+            operation.result(timeout=_BATCH_TIMEOUT)
+
+            # 4 — Read output shards from GCS (sorted for correct page order)
+            texts: list[str] = []
+            output_blobs = sorted(
+                bucket.list_blobs(prefix=output_prefix),
+                key=lambda b: b.name,
+            )
+            for blob in output_blobs:
+                if blob.name.endswith(".json"):
+                    doc = json.loads(blob.download_as_text())
+                    text = doc.get("text") or ""
+                    if text:
+                        texts.append(text)
+
+            return "\n".join(texts)
+
+        finally:
+            # 5 — Best-effort cleanup of temp GCS files
+            try:
+                bucket.blob(input_blob_name).delete()
+            except Exception:
+                pass
+            try:
+                for blob in list(bucket.list_blobs(prefix=output_prefix)):
+                    blob.delete()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Internal
@@ -73,7 +172,6 @@ class DocAIOCR:
         if self._client is None:
             from google.cloud import documentai
             from google.api_core.client_options import ClientOptions
-
             self._client = documentai.DocumentProcessorServiceClient(
                 client_options=ClientOptions(
                     api_endpoint=f"{DOCAI_LOCATION}-documentai.googleapis.com"
