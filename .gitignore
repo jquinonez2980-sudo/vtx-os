@@ -8,3 +8,5 @@ __pycache__/
 data/
 *.log
 =5.0.0
+sage50/=
+sage50_bridge/*.json
