@@ -252,6 +252,7 @@ def run() -> None:
                 account_no        = "xxxx9999",
                 business_no       = "987654321RT0001",
                 verbose           = False,
+                post_to_sage50    = False,
             )
 
     # ------------------------------------------------------------------ #

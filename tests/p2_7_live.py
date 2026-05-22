@@ -116,6 +116,7 @@ def run() -> None:
         verbose           = True,
         dry_run_email     = dry_run_email,
         email_output_path = email_out,
+        post_to_sage50    = False,
     )
 
     print()
@@ -157,8 +158,8 @@ def run() -> None:
     checks.append(("total_deposits == $23,249.07",   deposits == _dec("23249.07")))
     checks.append(("total_withdrawals == $9,819.46", withdrawals == _dec("9819.46")))
     checks.append(("auto + needs_review == total",   auto_cat + needs_rev == total_txn))
-    checks.append(("all 20 need review (no default rule matches cheques/PC Mastercard)",
-                   needs_rev == 20 and auto_cat == 0))
+    checks.append(("ConcettaRuleset: 15 auto-categorized, 5 needs review",
+                   auto_cat == 15 and needs_rev == 5))
     checks.append(("net_movement == $13,429.61",     net == _dec("13429.61")))
 
     # -------------------------------------------------------------- #

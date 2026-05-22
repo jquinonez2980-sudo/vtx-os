@@ -247,6 +247,7 @@ def _process_message(
     print(f"  Subject: {msg['subject']}")
     print(f"  PDFs   : {[a['filename'] for a in msg['attachments']]}")
 
+    all_ok = True
     with tempfile.TemporaryDirectory(prefix="vtx_") as tmp:
         tmp_path = Path(tmp)
         for att in msg["attachments"]:
@@ -261,10 +262,14 @@ def _process_message(
                 )
             except Exception as exc:
                 print(f"  ERROR: {att['filename']}: {exc}")
+                all_ok = False
 
     if not dry_run:
-        notifier.mark_read(msg["msg_id"])
-        print(f"\n  Marked read + labelled vtx-processed.")
+        if all_ok:
+            notifier.mark_read(msg["msg_id"])
+            print(f"\n  Marked read + labelled vtx-processed.")
+        else:
+            print(f"\n  Errors occurred — email left unread for retry.")
 
 
 # ---------------------------------------------------------------------------

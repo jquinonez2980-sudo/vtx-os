@@ -48,7 +48,7 @@ class DocAIOCR:
                 mime_type="application/pdf",
             ),
         )
-        result = self._get_client().process_document(request=request)
+        result = self._get_client().process_document(request=request, timeout=900.0)
         return result.document.text
 
     def ocr_pdf_file(self, path: str | Path) -> str:
@@ -65,7 +65,7 @@ class DocAIOCR:
             processor_id = get(PROCESSOR_SECRET)
             self._processor_name = (
                 f"projects/{DOCAI_PROJECT}/locations/{DOCAI_LOCATION}"
-                f"/processors/{processor_id}"
+                f"/processors/{processor_id.strip()}"
             )
         return self._processor_name
 

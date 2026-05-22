@@ -142,6 +142,21 @@ def _query_gl_totals(period_start: date, period_end: date) -> tuple[Decimal, Dec
     return rev2, exp2
 
 
+def _read_tax_csv(csv_path: str | Path) -> dict:
+    """Parse a Sage 50 Tax Summary CSV; return amounts as Decimals."""
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            return {
+                "taxable_sales":     Decimal(row.get("Taxable Sales",     "0") or "0"),
+                "tax_collected":     Decimal(row.get("Tax Collected",     "0") or "0"),
+                "taxable_purchases": Decimal(row.get("Taxable Purchases", "0") or "0"),
+                "itc_claimed":       Decimal(row.get("Input Tax Credits", "0") or "0"),
+                "net_tax":           Decimal(row.get("Net Tax",           "0") or "0"),
+                "tax_code":          (row.get("Tax Code") or "H").strip(),
+            }
+    return {}
+
+
 def _write_hst_csv(csv_path: str | Path, line: HSTReturnLine) -> None:
     """Write a single-row Tax Summary CSV for the period."""
     p = Path(csv_path)
@@ -185,22 +200,32 @@ class PrepareHSTReturnAgent(AgentBase):
         period_start = date(year, month, 1)
         period_end   = date(year, month, calendar.monthrange(year, month)[1])
 
-        # --- 2. Pull GL totals from BQ ---
-        taxable_sales, taxable_purchases = _query_gl_totals(period_start, period_end)
+        # --- 2. Pull GL totals (CSV when provided; BQ otherwise) ---
+        tax_csv_path = payload.get("tax_csv_path")
+        if tax_csv_path:
+            csv_data         = _read_tax_csv(tax_csv_path)
+            taxable_sales    = csv_data["taxable_sales"]
+            taxable_purchases= csv_data["taxable_purchases"]
+            tax_collected    = csv_data["tax_collected"]
+            itc_claimed      = csv_data["itc_claimed"]
+            line_net_tax     = csv_data["net_tax"]
+            tax_code         = csv_data.get("tax_code", tax_code)
+        else:
+            taxable_sales, taxable_purchases = _query_gl_totals(period_start, period_end)
 
-        if taxable_sales == 0 and taxable_purchases == 0:
-            return TaskResult(
-                task_id=request.task_id,
-                task_type=TaskType.PREPARE_HST_RETURN,
-                agent_id=self.agent_id,
-                status=EventStatus.FAILURE,
-                error=f"No GL or bank transaction data found for period {return_period}",
-            )
+            if taxable_sales == 0 and taxable_purchases == 0:
+                return TaskResult(
+                    task_id=request.task_id,
+                    task_type=TaskType.PREPARE_HST_RETURN,
+                    agent_id=self.agent_id,
+                    status=EventStatus.FAILURE,
+                    error=f"No GL or bank transaction data found for period {return_period}",
+                )
 
-        # --- 3. Compute CRA GST34 line amounts ---
-        tax_collected = (taxable_sales     * tax_rate).quantize(Decimal("0.01"))
-        itc_claimed   = (taxable_purchases * tax_rate).quantize(Decimal("0.01"))
-        line_net_tax  = tax_collected - itc_claimed
+            # --- 3. Compute CRA GST34 line amounts ---
+            tax_collected = (taxable_sales     * tax_rate).quantize(Decimal("0.01"))
+            itc_claimed   = (taxable_purchases * tax_rate).quantize(Decimal("0.01"))
+            line_net_tax  = tax_collected - itc_claimed
 
         line = HSTReturnLine(
             return_period=return_period,
