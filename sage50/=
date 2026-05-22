@@ -1,0 +1,21 @@
+from google_auth_oauthlib.flow import Flow
+
+SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+
+flow = Flow.from_client_secrets_file(
+    'client_secret.json',
+    scopes=SCOPES,
+    redirect_uri='urn:ietf:wg:oauth:2.0:oob'
+)
+
+auth_url, _ = flow.authorization_url(prompt='consent')
+
+print("\n=== OPEN THIS URL IN YOUR BROWSER ===\n")
+print(auth_url)
+print("\nAfter authorizing, paste the code here and press Enter.")
+
+code = input("Enter the authorization code: ")
+flow.fetch_token(code=code)
+
+print("\n=== SUCCESS ===")
+print("Refresh Token:", flow.credentials.refresh_token)

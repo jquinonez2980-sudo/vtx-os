@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>Sage50Bridge</AssemblyName>
+    <RootNamespace>Sage50Bridge</RootNamespace>
+    <Optimize>true</Optimize>
+    <PlatformTarget>x86</PlatformTarget>
+    <!-- Sage 50 SDK DLLs are 32-bit (installed under Program Files (x86)) -->
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Sage_SA.SDK">
+      <HintPath>$(MSBuildProgramFiles32)\Sage 50 Accounting SDK\SDK\Sage_SA.SDK.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Sage_SA.Domain">
+      <HintPath>$(MSBuildProgramFiles32)\Sage 50 Accounting SDK\SDK\Sage_SA.Domain.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Sage_SA.Domain.Utility">
+      <HintPath>$(MSBuildProgramFiles32)\Sage 50 Accounting SDK\SDK\Sage_SA.Domain.Utility.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Sage_SA.Common">
+      <HintPath>$(MSBuildProgramFiles32)\Sage 50 Accounting SDK\SDK\Sage_SA.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Sage_SA.DataAccess">
+      <HintPath>$(MSBuildProgramFiles32)\Sage 50 Accounting SDK\SDK\Sage_SA.DataAccess.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(MSBuildProgramFiles32)\Sage 50 Accounting SDK\SDK\Newtonsoft.Json.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

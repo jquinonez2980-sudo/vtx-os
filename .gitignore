@@ -1,0 +1,10 @@
+.venv/
+config/project.env
+config/service-account.json
+config/*.json
+__pycache__/
+*.pyc
+.env
+data/
+*.log
+=5.0.0

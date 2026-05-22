@@ -1,0 +1,36 @@
+# .claudeignore — vtx-os
+# Excludes files from Claude Code's automatic context scanning.
+# Sensitive, generated, or large files that are not source code.
+
+# Python virtual environment (large, not our code)
+.venv/
+
+# Bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Sensitive client data and test fixtures
+data/
+
+# Credentials and local config (never in context)
+config/project.env
+config/service-account.json
+config/*.json
+.env
+*.env
+
+# Log files
+*.log
+
+# Pip install artifact
+=5.0.0
+
+# Claude Code permissions file (not source)
+.claude/
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
