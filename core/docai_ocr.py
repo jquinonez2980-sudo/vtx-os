@@ -35,6 +35,78 @@ _SYNC_TIMEOUT    = 300.0              # seconds
 _BATCH_TIMEOUT   = 900               # seconds — LRO wait ceiling
 
 
+def _reconstruct_row_ordered_text(doc: dict) -> str:
+    """Reconstruct row-ordered text from Document AI batch JSON.
+
+    Document AI sometimes reads multi-column tables column-by-column rather
+    than row-by-row, producing description text separated from
+    amounts/dates/balances.  Using bounding-box Y-coordinates to re-sort
+    visual lines into proper rows gives DESCRIPTION  AMOUNT  DATE  BALANCE
+    on a single line — the format bank_statement_ocr_parser expects.
+    """
+    full_text = doc.get("text", "")
+    if not full_text:
+        return ""
+
+    page_texts: list[str] = []
+    for page in doc.get("pages", []):
+        items: list[tuple[float, float, str]] = []  # (center_y, center_x, text)
+
+        for line in page.get("lines", []):
+            layout = line.get("layout", {})
+
+            # Extract text via textAnchor segments into the global text field
+            line_text = ""
+            for seg in layout.get("textAnchor", {}).get("textSegments", []):
+                s = int(seg.get("startIndex", 0))
+                e = int(seg.get("endIndex", 0))
+                if 0 <= s < e <= len(full_text):
+                    line_text += full_text[s:e]
+            line_text = line_text.strip().rstrip("\n").strip()
+            if not line_text:
+                continue
+
+            # Bounding box centre
+            verts = layout.get("boundingPoly", {}).get("normalizedVertices", [])
+            if verts:
+                xs = [v.get("x", 0.0) for v in verts]
+                ys = [v.get("y", 0.0) for v in verts]
+                cx = (min(xs) + max(xs)) / 2.0
+                cy = (min(ys) + max(ys)) / 2.0
+            else:
+                cx, cy = 0.0, 0.0
+
+            items.append((cy, cx, line_text))
+
+        if not items:
+            continue
+
+        # Sort by (Y, X) — top-to-bottom then left-to-right
+        items.sort(key=lambda t: (t[0], t[1]))
+
+        # Group lines whose centres are within ~0.4 % of page height into the same row.
+        # Empirically measured on TD Bank scanned statements:
+        #   within-row Y variation: ≤ 0.0017   (elements on the same printed line)
+        #   between-row Y gap:      ≥ 0.009     (adjacent transaction rows)
+        # 0.004 is comfortably above within-row noise and well below between-row gaps.
+        ROW_TOL = 0.004
+        rows: list[list[tuple[float, float, str]]] = [[items[0]]]
+        for item in items[1:]:
+            if abs(item[0] - rows[-1][0][0]) <= ROW_TOL:
+                rows[-1].append(item)
+            else:
+                rows.append([item])
+
+        # Concatenate each row left-to-right with two spaces as column separator
+        page_line = "\n".join(
+            "  ".join(t[2] for t in sorted(row, key=lambda t: t[1]))
+            for row in rows
+        )
+        page_texts.append(page_line)
+
+    return "\n".join(page_texts) if page_texts else full_text
+
+
 class DocAIOCR:
     """Document AI OCR processor. Credentials and processor name are lazily resolved."""
 
@@ -94,13 +166,18 @@ class DocAIOCR:
         bucket = storage_client.bucket(_GCS_BUCKET)
 
         # 1 — Upload PDF to a temporary GCS location.
-        # Use upload_from_file (resumable for > 8 MB) with a generous timeout.
+        # Use upload_from_file (resumable for > 8 MB).
+        # timeout=600 is the per-request timeout; retry deadline is set to 660 s
+        # to avoid the default 120 s api-core retry ceiling on large uploads.
         import io
+        from google.api_core import retry as api_retry
+        _upload_retry = api_retry.Retry(deadline=660)
         bucket.blob(input_blob_name).upload_from_file(
             io.BytesIO(pdf_bytes),
             content_type="application/pdf",
             size=len(pdf_bytes),
             timeout=600,
+            retry=_upload_retry,
         )
 
         try:
@@ -136,7 +213,7 @@ class DocAIOCR:
             for blob in output_blobs:
                 if blob.name.endswith(".json"):
                     doc = json.loads(blob.download_as_text())
-                    text = doc.get("text") or ""
+                    text = _reconstruct_row_ordered_text(doc) or doc.get("text") or ""
                     if text:
                         texts.append(text)
 

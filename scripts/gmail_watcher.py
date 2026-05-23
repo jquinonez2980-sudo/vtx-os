@@ -256,10 +256,13 @@ def _process_message(
                 pdf_path = notifier.save_attachment(
                     msg["msg_id"], att["attachment_id"], att["filename"], tmp_path
                 )
-                _process_pdf(
+                result = _process_pdf(
                     pdf_path, att["filename"], msg["epoch_ms"],
                     period_override, cfg, dry_run,
                 )
+                if "error" in result:
+                    print(f"  ERROR: {att['filename']}: {result['error']}")
+                    all_ok = False
             except Exception as exc:
                 print(f"  ERROR: {att['filename']}: {exc}")
                 all_ok = False

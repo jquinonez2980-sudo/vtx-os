@@ -121,9 +121,17 @@ _MONTH_MAP = {
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 
-# "Jan 02" or "Jan  2" at line start (TD, BMO, Scotia)
+# "Jan 02", "Jan02", "FEB02" etc. at line start (TD, BMO, Scotia).
+# \s* allows zero or more spaces between month abbreviation and day digits (some TD
+# Bank OCR output omits the space: "FEB02" rather than "FEB 02").
 _MDAY_RE = re.compile(
-    r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\s+",
+    r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})\b",
+    re.I,
+)
+# Same pattern but matches anywhere in a line (used for DESCRIPTION AMOUNT DATE BALANCE
+# format produced by Document AI bounding-box row reconstruction on TD Bank statements).
+_MDAY_RE_MID = re.compile(
+    r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})\b",
     re.I,
 )
 # "YYYY-MM-DD" or "YYYY/MM/DD"
@@ -164,6 +172,31 @@ def _try_parse_date(line: str, year: int) -> tuple[date | None, str]:
                     continue
 
     return None, line
+
+
+def _try_find_date_mid(
+    line: str, year: int
+) -> tuple[date | None, str, str]:
+    """Search for a month-day date token ANYWHERE in *line*.
+
+    Used for TD Bank Document AI row-reconstruction format where each line is
+    "DESCRIPTION  AMOUNT  DATE  [BALANCE]" (date near end, not at start).
+
+    Returns (date, before_date_text, after_date_text) on match, or
+    (None, "", line) on failure.
+    """
+    for m in _MDAY_RE_MID.finditer(line):
+        month = _MONTH_MAP.get(m.group(1).lower()[:3])
+        if month is None:
+            continue
+        try:
+            d = date(year, month, int(m.group(2)))
+        except ValueError:
+            continue
+        before = line[: m.start()].strip()
+        after  = line[m.end() :].strip()
+        return d, before, after
+    return None, "", line
 
 
 # ---------------------------------------------------------------------------
@@ -295,13 +328,27 @@ def _parse_lines(lines: list[str], year: int) -> list[_Txn]:
             continue
 
         txn_date, rest = _try_parse_date(line, year)
+
         if txn_date is None:
-            # Seed prev_balance from "BALANCE FORWARD" / opening-balance lines.
-            if prev_balance is None and _BAL_FORWARD_RE.search(line):
-                bals = _extract_amounts(line)
-                if bals:
-                    prev_balance = bals[-1]
-            continue
+            # Opening-balance lines must be handled BEFORE the mid-line date search;
+            # otherwise "_try_find_date_mid" picks up the date embedded in
+            # "BALANCE FORWARD  JAN30  12,713.96" and creates a spurious transaction
+            # instead of just seeding prev_balance.
+            if _BAL_FORWARD_RE.search(line):
+                if prev_balance is None:
+                    bals = _extract_amounts(line)
+                    if bals:
+                        prev_balance = bals[-1]
+                continue
+
+            # Fallback: date appears mid-line (TD Bank row-reconstruction format
+            # "DESCRIPTION  AMOUNT  DATE  [BALANCE]").
+            txn_date, before, after = _try_find_date_mid(line, year)
+            if txn_date is not None:
+                # Combine before + after so amount extraction still works.
+                rest = before + "  " + after
+            else:
+                continue
 
         amounts = _extract_amounts(rest)
         if not amounts:
