@@ -4,8 +4,8 @@ VTX-OS Gmail bank statement watcher.
 
 For each unread inbox email with a PDF attachment:
   1. Download the PDF via Gmail API
-  2. OCR the PDF with Document AI  →  plain text
-  3. Parse OCR text                →  CSV (Date, Description, Debit, Credit, Balance)
+  2. Extract text via BankStatementExtractor (PyMuPDF → pdfplumber → Document AI)
+  3. Parse text                    →  CSV (Date, Description, Debit, Credit, Balance)
   4. Drop CSV to R:\\<client_folder>\\drop\\   (manual pickup / csv_watcher integration)
   5. Upload CSV to GCS:  sage50/raw/YYYY/MM/DD/bank_statement/<filename>
   6. Trigger BookkeepingAgent directly (parse → categorize → BQ → approval queue)
@@ -170,32 +170,39 @@ def _process_pdf(
     cfg: dict,
     dry_run: bool,
 ) -> dict:
-    from core.docai_ocr import ocr_pdf_bytes
-    from sage50.bank_statement_ocr_parser import detect_bank, parse_and_write_csv
+    from sage50.statement_extractor import BankStatementExtractor
+    from sage50.bank_statement_ocr_parser import write_csv
 
     period = period_override or _period_from_filename(fname) or _period_from_epoch(epoch_ms)
     print(f"    Period : {period}")
 
-    # Step 1 — Document AI OCR
-    print(f"    OCR    : Document AI...", end=" ", flush=True)
-    ocr_text = ocr_pdf_bytes(pdf_path.read_bytes())
-    print(f"{len(ocr_text):,} chars")
+    # Step 1 — Extract text (PyMuPDF → pdfplumber → Document AI cascade).
+    # Digital PDFs exit at PyMuPDF in ~50 ms; only scanned PDFs reach DocAI.
+    print(f"    Extract: ", end=" ", flush=True)
+    ext = BankStatementExtractor().extract(pdf_path)
+    print(
+        f"{ext.path_used.value} "
+        f"(conf={ext.confidence:.2f}, {ext.pages}p, {ext.elapsed_ms} ms, {len(ext.text):,} chars)"
+    )
 
-    if not ocr_text.strip():
-        return {"error": "Document AI returned empty text — check processor ID and PDF quality"}
+    if not ext.text.strip():
+        return {"error": "all extraction paths produced empty text — check PDF quality / DocAI processor"}
 
-    # Step 2 — Parse OCR text → CSV
-    bank     = detect_bank(ocr_text)
+    # Step 2 — Write CSV (transactions already parsed during extraction)
+    bank     = ext.bank_code
     safe     = re.sub(r"[^\w.\-]", "_", fname).replace(".pdf", f"-{period}.csv")
     csv_path = pdf_path.parent / safe
 
-    n = parse_and_write_csv(ocr_text, csv_path, bank=bank)
+    n = write_csv(ext.transactions, csv_path)
     print(f"    Bank   : {bank.value}  |  parsed {n} transactions → {safe}")
 
     if n == 0:
-        return {"error": "zero transactions parsed — OCR text may not contain a statement table"}
+        return {"error": "zero transactions parsed — statement layout not recognised"}
 
-    result: dict = {"period": period, "bank": bank.value, "transactions": n}
+    result: dict = {
+        "period": period, "bank": bank.value, "transactions": n,
+        "extract_path": ext.path_used.value, "extract_ms": ext.elapsed_ms,
+    }
 
     if dry_run:
         print(f"    [dry-run] skipping R:\\, GCS, BookkeepingAgent")

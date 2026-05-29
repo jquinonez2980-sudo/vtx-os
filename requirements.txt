@@ -14,6 +14,11 @@ google-auth-oauthlib>=1.2.0
 # Cloud Functions / Eventarc
 functions-framework>=3.5.0
 
+# PDF extraction
+pymupdf>=1.23.0
+pdfplumber>=0.10.0
+pandas>=2.0.0
+
 # Utilities
 python-dotenv>=1.0.0
 pydantic>=2.7.0

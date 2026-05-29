@@ -96,7 +96,12 @@ models/
   approval.py      ApprovalItem, ApprovalStatus
 
 sage50/
-  pdf_extractor.py OCR-resistant TD Bank PDF → TD-format CSV; balance-chain correction
+  statement_extractor.py  CANONICAL PDF→BankTransaction extractor. Three-tier cascade
+                          (PyMuPDF → pdfplumber → Document AI), parse-aware confidence
+                          routing. Use this for all new PDF ingestion.
+  bank_statement_ocr_parser.py  Bank-agnostic OCR text → _Txn parser (all 7 banks)
+  pdf_extractor.py LEGACY — TD-only OCR PDF → TD-format CSV with balance-chain correction.
+                   Superseded by statement_extractor.py; kept for its TD balance-chain logic.
   bank_parser.py   Auto-detects 7 Canadian bank CSV formats; sha256 dedup
   categorizer.py   29 regex rules, Canadian context; confidence scoring
   csv_uploader.py  GCS upload with ReportType enum + lifecycle folder structure

@@ -30,6 +30,10 @@ from decimal import Decimal
 from pathlib import Path
 
 
+def _dec(key: str, d: dict) -> Decimal:
+    return Decimal(str(d.get(key, "0")))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -38,7 +42,7 @@ def run_pipeline(
     client_id:          str,
     period:             str,                # "YYYY-MM"
     bank_csv_path:      str,                # TD-format bank statement CSV
-    tax_csv_path:       str,                # Sage 50 Tax Summary CSV
+    tax_csv_path:       str | None,         # Sage 50 Tax Summary CSV; None = skip HST step
     engagement_letter:  str,                # full engagement letter text
     client_email:       str,                # recipient of the close email
     account_no:         str  = "xxxx1234",
@@ -163,11 +167,22 @@ def run_pipeline(
     # ------------------------------------------------------------------
     # Step 4 — HST return preparation
     # ------------------------------------------------------------------
-    results["hst"] = _run(4, "Preparing HST return", TaskType.PREPARE_HST_RETURN, {
-        "tax_csv_path":  tax_csv_path,
-        "return_period": period,
-        "business_no":   business_no,
-    })
+    if tax_csv_path is None:
+        if verbose:
+            print("  [4/6] Preparing HST return... SKIPPED (no tax CSV)")
+        results["hst"] = TaskResult(
+            task_id=str(uuid.uuid4()),
+            task_type=TaskType.PREPARE_HST_RETURN,
+            agent_id="prepare-hst-return-agent",
+            status=EventStatus.SKIPPED,
+            output={},
+        )
+    else:
+        results["hst"] = _run(4, "Preparing HST return", TaskType.PREPARE_HST_RETURN, {
+            "tax_csv_path":  tax_csv_path,
+            "return_period": period,
+            "business_no":   business_no,
+        })
 
     # ------------------------------------------------------------------
     # Step 5 — RAG query: retrieve engagement letter context for email
@@ -245,9 +260,6 @@ def _compose_email(
     to: str,
 ) -> dict:
     """Build SEND_CLIENT_EMAIL payload from pipeline outputs."""
-
-    def _dec(key, d):
-        return Decimal(str(d.get(key, "0")))
 
     deposits     = _dec("total_deposits",    bk)
     withdrawals  = _dec("total_withdrawals", bk)
@@ -342,15 +354,15 @@ def _print_summary(results: dict) -> None:
     bk = results.get("bookkeeping")
     if bk and bk.ok:
         o = bk.output
-        deposits    = Decimal(str(o.get("total_deposits",    "0")))
-        withdrawals = Decimal(str(o.get("total_withdrawals", "0")))
-        net         = Decimal(str(o.get("net_movement",      "0")))
+        deposits    = _dec("total_deposits",    o)
+        withdrawals = _dec("total_withdrawals", o)
+        net         = _dec("net_movement",      o)
         print(f"\n  Bank: deposits ${deposits:,.2f}  withdrawals ${withdrawals:,.2f}  net ${net:+,.2f}")
 
     hst = results.get("hst")
     if hst and hst.ok:
         o = hst.output
-        line_109 = Decimal(str(o.get("line_109_net_tax", "0")))
+        line_109 = _dec("line_109_net_tax", o)
         due      = o.get("filing_due_date", "")
         print(f"  HST:  net tax owing ${line_109:,.2f}  (due {due})")
 
@@ -369,10 +381,13 @@ if __name__ == "__main__":
     _parser.add_argument("--sage50-sai",      default=None, help="Sage 50 .SAI file path")
     _parser.add_argument("--sage50-user",     default=None)
     _parser.add_argument("--sage50-password", default=None)
+    _parser.add_argument("--period",          default=None, help="Override period, e.g. 2026-02")
+    _parser.add_argument("--skip-hst",        action="store_true",
+                         help="Skip PREPARE_HST_RETURN (no tax CSV required)")
     _args = _parser.parse_args()
 
     CLIENT_ID    = os.environ.get("CLIENT_ID",    "concetta-enterprises")
-    PERIOD       = os.environ.get("PERIOD",       "2025-12")
+    PERIOD       = _args.period or os.environ.get("PERIOD", "2025-12")
     CLIENT_EMAIL = os.environ.get("CLIENT_EMAIL", "jquinonez2980@gmail.com")
     BASE         = Path(__file__).resolve().parents[1]
 
@@ -402,12 +417,36 @@ Contact: Jorge Quinonez CPA, jquinonez2980@gmail.com
 
     print(f"\nRunning monthly close: {CLIENT_ID} | {PERIOD}\n")
 
+    # Resolve per-period file paths
+    _PERIOD_FILES: dict[str, dict] = {
+        "2025-12": {
+            "bank_csv": str(BASE / "data/test-client/dec-2025-bank-extracted.csv"),
+            "gl_csv":   str(BASE / "data/test-client/concetta-dec2025-gl.csv"),
+            "tax_csv":  str(BASE / "data/test-client/concetta-dec2025-tax.csv"),
+        },
+        "2026-01": {
+            "bank_csv": str(BASE / "data/test-client/concetta-jan2026-bank.csv"),
+            "gl_csv":   None,
+            "tax_csv":  str(BASE / "data/test-client/concetta-jan2026-tax.csv"),
+        },
+        "2026-02": {
+            "bank_csv": r"R:\Concetta Enterprises Inc\drop\HWY_7___PINEVALLEY-2026-02.csv",
+            "gl_csv":   None,   # re-fetched from Sage 50 after journal posting
+            "tax_csv":  None,   # exported separately; pass --skip-hst when absent
+        },
+    }
+    _pf = _PERIOD_FILES.get(PERIOD, {
+        "bank_csv": str(BASE / f"data/test-client/concetta-{PERIOD}-bank.csv"),
+        "gl_csv":   None,
+        "tax_csv":  str(BASE / f"data/test-client/concetta-{PERIOD}-tax.csv"),
+    })
+
     results = run_pipeline(
         client_id         = CLIENT_ID,
         period            = PERIOD,
-        bank_csv_path     = str(BASE / "data/test-client/dec-2025-bank-extracted.csv"),
-        gl_csv_path       = str(BASE / "data/test-client/concetta-dec2025-gl.csv"),
-        tax_csv_path      = str(BASE / "data/test-client/concetta-dec2025-tax.csv"),
+        bank_csv_path     = _pf["bank_csv"],
+        gl_csv_path       = _pf["gl_csv"],
+        tax_csv_path      = None if _args.skip_hst else _pf["tax_csv"],
         engagement_letter = ENGAGEMENT_LETTER,
         client_email      = CLIENT_EMAIL,
         account_no        = "xxxx5443",

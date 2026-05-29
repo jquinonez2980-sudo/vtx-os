@@ -22,8 +22,11 @@ Usage (module-level convenience):
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 DOCAI_LOCATION   = "us"
 DOCAI_PROJECT    = os.environ.get("GOOGLE_CLOUD_PROJECT", "vtx-accounting-os-prod")
@@ -133,6 +136,7 @@ class DocAIOCR:
     # ------------------------------------------------------------------
 
     def _ocr_sync(self, pdf_bytes: bytes) -> str:
+        import json
         from google.cloud import documentai
         request = documentai.ProcessRequest(
             name=self._get_processor_name(),
@@ -144,7 +148,22 @@ class DocAIOCR:
         result = self._get_client().process_document(
             request=request, timeout=_SYNC_TIMEOUT
         )
-        return result.document.text
+        doc = result.document
+
+        # Apply the same bounding-box row reconstruction as the batch path.
+        # Without it, multi-column statements (e.g. TD Bank) come back read
+        # column-by-column — descriptions split from their amounts/dates — and
+        # bank_statement_ocr_parser parses 0 transactions. to_json() emits the
+        # camelCase field names _reconstruct_row_ordered_text expects.
+        try:
+            doc_dict = json.loads(documentai.Document.to_json(doc))
+            reconstructed = _reconstruct_row_ordered_text(doc_dict)
+            if reconstructed.strip():
+                return reconstructed
+        except Exception as exc:
+            log.warning("sync row reconstruction failed, using raw text: %s", exc)
+
+        return doc.text
 
     # ------------------------------------------------------------------
     # Batch/async path (≥ 5 MB)

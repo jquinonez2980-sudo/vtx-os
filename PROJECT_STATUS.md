@@ -1,5 +1,5 @@
 # PROJECT_STATUS.md — Vertex AI Accounting OS
-# Updated: 2026-05-22  |  Session: 11  (Concetta 2026.SAI data cleanup)
+# Updated: 2026-05-29  |  Session: 14  (Phase 2 close-out: extractor wired in + extraction-layer hardening)
 # Trace: vtx-os-proj-001
 
 ## CURRENT PHASE
@@ -430,14 +430,157 @@ If it doesn't, an additional correction entry may be needed dated April 30, 2025
 
 Retained Earnings 3500: lId = 35000000 (display code × 10000 pattern; not in CONCETTA_ACCOUNT_MAP).
 
+## DOCUMENT AI BATCH OCR — LARGE PDF PARSING  [COMPLETE 2026-05-23]
+Session 12: diagnosed and fixed 0-transaction failure for Concetta Feb 2026 statement (18 MB scanned TD Bank PDF).
+
+### Root causes and fixes (commit 45df822)
+
+**Fix 1 — `_MDAY_RE` regex (`sage50/bank_statement_ocr_parser.py`)**
+- TD Bank OCR outputs "FEB02" (no space) not "FEB 02" — `\s+` between month and day failed to match
+- Changed to `\s*` (optional space) + `\b` trailing word boundary
+
+**Fix 2 — Bounding-box row reconstruction (`core/docai_ocr.py`)**
+- Document AI batch mode reads wide multi-column tables column-by-column: descriptions appear on
+  separate lines from amounts, dates, and balances. Standard text field unusable for row parsing.
+- Added `_reconstruct_row_ordered_text()`: sorts all OCR line elements by (center_Y, center_X)
+  using `normalizedVertices` bounding boxes, groups by Y proximity (ROW_TOL=0.004), concatenates
+  with 2-space separator → "DESCRIPTION  AMOUNT  DATE  BALANCE" on one line per transaction
+- ROW_TOL calibration: within-row Y variation ≤0.0017, between-row gap ≥0.009 on TD Bank scans
+  (0.004 is mid-point; 0.012 first attempt was merging 3 adjacent rows)
+- GCS upload retry deadline: `api_retry.Retry(deadline=660)` — google-api-core default 120s was
+  too short for 18 MB file; `timeout=600` on upload_from_file sets per-request timeout separately
+
+**Fix 3 — Mid-line date search + BALANCE FORWARD priority (`sage50/bank_statement_ocr_parser.py`)**
+- Added `_MDAY_RE_MID` (no `^` anchor) and `_try_find_date_mid()` to find date tokens mid-line
+  (TD Bank row-reconstruction layout: DESCRIPTION→AMOUNT→DATE→BALANCE, date not at line start)
+- `_BAL_FORWARD_RE` check added BEFORE `_try_find_date_mid` in `_parse_lines()`:
+  "BALANCE FORWARD JAN30 12,713.96" was being parsed as a JAN30 credit transaction because
+  `_try_find_date_mid` found the embedded date first; this also left prev_balance=None for all
+  subsequent transactions, causing debit/credit misclassification
+
+**Fix 4 — Watcher error propagation (`scripts/gmail_watcher.py`)**
+- `_process_pdf()` return value was discarded — zero-transaction errors didn't set `all_ok=False`
+- Email was marked as read even on parse failure; fixed by capturing and checking the `"error"` key
+
+### Results
+- Input: `HWY 7 & PINEVALLEY.pdf` — 18,270,858 bytes, Concetta Enterprises Feb 2026
+- Output: `R:\Concetta Enterprises Inc\drop\HWY_7___PINEVALLEY-2026-02.csv` — 33 transactions
+- All transactions correctly classified as debits; running balances match statement
+  (e.g., 11,820.94 after FEB02 CHQs → 5,343.64 final balance FEB27)
+- BookkeepingAgent: 18 auto-categorized | 15 needs review
+- One missing transaction: MONTHLY PLAN FEE $19.00 (page 2 layout edge case — will surface in GL recon)
+- 97% recall (33/34) — acceptable for scanned PDF via batch OCR
+
+## SESSION 13 CHANGES  [2026-05-28]
+
+### 1 — High-performance PDF extractor: `sage50/statement_extractor.py`
+
+New module replacing the single DocAI-always path in `gmail_watcher.py` with a
+three-tier confidence-routed pipeline:
+
+| Path | Latency | Trigger |
+|---|---|---|
+| PyMuPDF (fitz) | 10–50 ms/page | Default — digital-native PDFs (online banking downloads) |
+| pdfplumber | 200–800 ms/page | Fallback — complex digital layouts below confidence threshold |
+| Document AI OCR | 10–90 s total | Last resort — scanned / image-only PDFs (e.g. 18 MB Concetta scan) |
+
+Confidence score = printable-char density per page, normalised to [0, 1].
+Threshold = 0.40 (configurable). Scanned PDFs score ~0.0 and cascade to DocAI
+exactly as before; digital PDFs score ~0.9 and exit after PyMuPDF in ~50 ms.
+
+**Public API:**
+- `BankStatementExtractor.extract_transactions(pdf_path, bank="auto") -> list[BankTransaction]`
+- `BankStatementExtractor.extract_to_csv(pdf_path, csv_path) -> Path`
+- `BankStatementExtractor.to_dataframe(txns) -> pd.DataFrame`
+- `extract_batch(pdf_paths, max_workers=4)` — thread-pool batch processing
+- `benchmark(pdf_path)` — times all three paths, prints comparison table
+
+Text from any path feeds into the existing `bank_statement_ocr_parser.parse_ocr_text()`;
+conversion to `BankTransaction` applies the sign convention (credit − abs(debit)).
+
+**Integration point (not yet wired — next step):**
+Replace lines 173–192 of `scripts/gmail_watcher.py`:
+```python
+# Before (always DocAI):
+ocr_text = ocr_pdf_bytes(pdf_path.read_bytes())
+n = parse_and_write_csv(ocr_text, csv_path)
+
+# After (PyMuPDF first, DocAI only for scanned):
+from sage50.statement_extractor import extract_to_csv
+extract_to_csv(pdf_path, csv_path)
+```
+
+**Dependencies added to requirements.txt:**
+- `pymupdf>=1.23.0`
+- `pdfplumber>=0.10.0`  (was used but not pinned)
+- `pandas>=2.0.0`
+
+### 2 — demo/monthly_close_demo.py cleanup
+
+- `EventStatus.FAILURE` → `EventStatus.SKIPPED` for the skip-HST branch
+- Removed redundant `from models.base import EventStatus` inside the `if` block
+- `agent_id="hst-return-agent"` → `"prepare-hst-return-agent"` (matches class constant)
+- Removed `skip_hst: bool` parameter — skip condition now derived from `tax_csv_path is None`
+  (eliminates inconsistent state where `tax_csv_path=None, skip_hst=False` would crash)
+- Hoisted `_dec(key, d)` to module level; `_print_summary` now uses it instead of inline `Decimal(str(...))`
+- Reverted `→` → `->` cosmetic change (project convention is Unicode arrow)
+
+## SESSION 14 CHANGES  [2026-05-29]
+Phase 2 close-out: wired the high-performance extractor into the live pipeline and
+hardened the extraction layer. Surgical changes only — no stable module rewrites.
+
+### 1 — `statement_extractor` wired into `scripts/gmail_watcher.py`  [H1]
+- `_process_pdf()` Step 1 now calls `BankStatementExtractor().extract(pdf_path)` instead of
+  the always-DocAI `ocr_pdf_bytes()` path. Digital PDFs exit at PyMuPDF (~50 ms); only
+  scanned PDFs reach Document AI. Logs the chosen path, confidence, pages, and elapsed ms.
+- TaskResult now also reports `extract_path` + `extract_ms` for observability.
+- Single extraction + parse is reused (no double DocAI call): `extract()` returns parsed
+  transactions, then `write_csv()` serialises them.
+
+### 2 — Public `extract()` seam + parse-aware cascade  [M3 + M1] (`sage50/statement_extractor.py`)
+- Promoted internal `_extract_text` to public `extract(pdf_path, bank="auto") -> ExtractionResult`.
+- `ExtractionResult` now carries `bank_code` + parsed `transactions` (+ `txn_count` property)
+  so callers extract once and reuse — no second extraction or parse.
+- Cascade is now PARSE-AWARE: a path wins only if `confidence >= threshold AND txn_count > 0`.
+  Guards against dense-but-unparseable digital PDFs that previously exited early with 0 txns.
+- `extract_to_csv` now logs a warning (instead of silently writing 0 rows) on empty text.
+
+### 3 — Document AI sync-path row reconstruction  [H2] (`core/docai_ocr.py`)
+- `_ocr_sync` (PDFs < 5 MB) now applies `_reconstruct_row_ordered_text` via
+  `documentai.Document.to_json()`, matching the batch path. Previously small SCANNED PDFs
+  returned column-disordered text and parsed 0 transactions. Falls back to raw text on error.
+
+### 4 — Decimal preserved in `to_dataframe`  [M2]
+- `BankStatementExtractor.to_dataframe` no longer coerces amount/balance to `float`
+  (object dtype Decimal). Honours the "money never float" convention; view-only helper.
+
+### 5 — Tests + docs  [M4]
+- `tests/statement_extractor_smoke.py` — 8/8 offline checks (fake paths; no GCP):
+  fixture parse, bank detect, parse-aware fallthrough, force_path, sign convention,
+  extract_to_csv row count. (to_dataframe Decimal check skips if pandas absent.)
+- CLAUDE.md directory map: `statement_extractor.py` marked CANONICAL; `pdf_extractor.py`
+  marked LEGACY (TD-only, kept for balance-chain logic).
+
+### Live validation (TODO — needs ADC + real PDFs)
+  - `python scripts/gmail_watcher.py --client concetta --period 2026-02 --dry-run`
+  - `python -c "from sage50.statement_extractor import benchmark; benchmark('<digital TD .pdf>')"`
+    Expect ~50 ms PyMuPDF vs ~40 s DocAI on a digital statement.
+
 ## NEXT STEPS
-Phase 2 complete. Phase 3 options:
-  A. Re-run monthly close demo with live Gmail send (OAuth now configured)
+Phase 2 complete and wired. Phase 3 options:
+  A. Live-validate the wired extractor (see "Live validation" above) on a digital + scanned PDF
+  B. Run February 2026 monthly close pipeline
+       Needs: Feb 2026 GL export CSV + Tax Summary CSV (bank statement now available)
+       Then: demo/monthly_close_demo.py --period 2026-02 --skip-hst + JournalEntryAgent
+  C. Re-run monthly close demo with live Gmail send (OAuth now configured)
        python demo/monthly_close_demo.py
-  B. Build Sage 50 ODBC integration (Sage50OdbcAgent live test)
-  C. Build SupervisorAgent natural-language dispatch for full close workflow
-  D. Add T2 corporate tax return agent (PrepareT2ReturnAgent)
-  E. Add year-end close workflow (YEAR_END_CLOSE TaskType)
+  D. Build Sage 50 ODBC integration (Sage50OdbcAgent live test)
+  E. Build SupervisorAgent natural-language dispatch for full close workflow
+  F. Add T2 corporate tax return agent (PrepareT2ReturnAgent)
+
+Pending cleanup:
+  ⚠ Duplicate Dec 2025 journal entries in Sage 50 (J329–J348) — not yet addressed
+  ⚠ Trial balance as at 2025-04-30 to verify opening balance $19,077.69 (from Session 11)
 
 Before production:
   ✓ gcloud auth application-default login   (ADC configured 2026-05-07)
