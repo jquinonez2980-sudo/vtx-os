@@ -434,6 +434,11 @@ Contact: Jorge Quinonez CPA, jquinonez2980@gmail.com
             "gl_csv":   None,   # re-fetched from Sage 50 after journal posting
             "tax_csv":  None,   # exported separately; pass --skip-hst when absent
         },
+        "2026-03": {
+            "bank_csv": r"R:\Concetta Enterprises Inc\drop\JCA2002575-0031317-15659-0001-0001-00--2026-03.csv",
+            "gl_csv":   None,   # re-fetched from Sage 50 after journal posting
+            "tax_csv":  None,   # exported separately; pass --skip-hst when absent
+        },
     }
     _pf = _PERIOD_FILES.get(PERIOD, {
         "bank_csv": str(BASE / f"data/test-client/concetta-{PERIOD}-bank.csv"),
