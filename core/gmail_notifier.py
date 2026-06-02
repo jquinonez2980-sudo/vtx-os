@@ -148,6 +148,19 @@ class GmailNotifier:
             body={"removeLabelIds": ["UNREAD"], "addLabelIds": [label_id]},
         ).execute()
 
+    def apply_label(self, msg_id: str, label_name: str) -> None:
+        """Apply *label_name* (created if absent) WITHOUT marking the message read.
+
+        Used to quarantine unrouted statements: the email stays unread so it is
+        retried on the next poll once a mapping is added.
+        """
+        label_id = self._get_or_create_label(label_name)
+        self._svc().users().messages().modify(
+            userId="me",
+            id=msg_id,
+            body={"addLabelIds": [label_id]},
+        ).execute()
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

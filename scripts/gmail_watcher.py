@@ -5,22 +5,27 @@ VTX-OS Gmail bank statement watcher.
 For each unread inbox email with a PDF attachment:
   1. Download the PDF via Gmail API
   2. Extract text via BankStatementExtractor (PyMuPDF → pdfplumber → Document AI)
-  3. Parse text                    →  CSV (Date, Description, Debit, Credit, Balance)
-  4. Drop CSV to R:\\<client_folder>\\drop\\   (manual pickup / csv_watcher integration)
-  5. Upload CSV to GCS:  sage50/raw/YYYY/MM/DD/bank_statement/<filename>
-  6. Trigger BookkeepingAgent directly (parse → categorize → BQ → approval queue)
-  7. Mark email as read and label it vtx-processed
+  3. Resolve the client by the account number on the statement (core.client_registry)
+  4. Parse text                    →  CSV (Date, Description, Debit, Credit, Balance)
+  5. Drop CSV to R:\\<client_folder>\\drop\\   (manual pickup / csv_watcher integration)
+  6. Upload CSV to GCS:  sage50/raw/YYYY/MM/DD/bank_statement/<filename>
+  7. Trigger BookkeepingAgent directly (parse → categorize → BQ → approval queue)
+  8. Mark email read + label vtx-processed; unrouted mail is labelled vtx-unrouted
+     (left unread) and a Google Chat alert is sent.
 
 Usage:
-    python scripts/gmail_watcher.py --client concetta --once
-    python scripts/gmail_watcher.py --client concetta --period 2026-02 --dry-run
-    python scripts/gmail_watcher.py --client concetta --interval 300
+    python scripts/gmail_watcher.py --once                       # auto-route all clients
+    python scripts/gmail_watcher.py --client concetta --once     # pin to one client
+    python scripts/gmail_watcher.py --period 2026-02 --dry-run
+    python scripts/gmail_watcher.py --interval 300
 
-    --client   required  client slug from the registry below (e.g. concetta)
+    --client   optional  pin to one client slug; omit to auto-route by account number
     --period   optional  override period detection, e.g. 2026-02
     --once               process current unread batch then exit
     --interval           poll interval in seconds (default: 300)
     --dry-run            OCR + parse only; skip R:\\, GCS, and BookkeepingAgent
+
+Client registry: R:\\bookkeeping\\client_accounts.csv (see core/client_registry.py).
 """
 
 from __future__ import annotations
@@ -37,30 +42,24 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 # ---------------------------------------------------------------------------
-# Client registry — extend as new clients are onboarded
+# Routing — clients are resolved per-statement from core.client_registry
+# (CSV on R:). See core/client_registry.py.
 # ---------------------------------------------------------------------------
 
 _R_DRIVE    = Path(r"R:\\")
 GCS_BUCKET  = "vtx-accounting-os-prod-vtx-exports"
 GCP_PROJECT = "vtx-accounting-os-prod"
 _DEFAULT_INTERVAL = 300  # seconds
-
-_CLIENT_CONFIGS: dict[str, dict] = {
-    "concetta": {
-        "r_folder":        "Concetta Enterprises Inc",
-        "account_no":      "xxxx5443",
-        "gl_bank_account": "1060",
-        "client_id":       "concetta",
-    },
-}
+_UNROUTED_LABEL = "vtx-unrouted"
 
 
-def _resolve_client(slug: str) -> dict:
-    cfg = _CLIENT_CONFIGS.get(slug.lower())
-    if cfg is None:
-        known = ", ".join(_CLIENT_CONFIGS)
-        raise SystemExit(f"Unknown --client '{slug}'. Known clients: {known}")
-    return cfg
+def _pin_client(registry: dict, slug: str):
+    """Return the registry entry whose client_id matches *slug* (for --client)."""
+    for cfg in registry.values():
+        if cfg.client_id.lower() == slug.lower():
+            return cfg
+    known = ", ".join(sorted(c.client_id for c in registry.values())) or "(none)"
+    raise SystemExit(f"Unknown --client '{slug}'. Known clients: {known}")
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +92,32 @@ def _period_from_filename(name: str) -> str | None:
     return None
 
 
+# TD prints the statement period as a 'From - To' range, e.g.
+# "DEC 31/25 - JAN 30/26". The period is the CLOSING (To) month/year.
+_PERIOD_RANGE_RE = re.compile(
+    r"[A-Za-z]{3}\s*\d{1,2}\s*/\s*\d{2}\s*[-–—]\s*([A-Za-z]{3})\s*\d{1,2}\s*/\s*(\d{2})"
+)
+
+
+def _period_from_text(text: str) -> str | None:
+    """Parse the statement's own closing period from OCR text (YYYY-MM).
+
+    Authoritative: reads the 'Statement From - To' range and returns the To
+    (closing) date's month/year. Preferred over filename/subject/email-date,
+    which are only heuristics.
+    """
+    m = _PERIOD_RANGE_RE.search(text)
+    if not m:
+        return None
+    mon = _MONTH_ABBR.get(m.group(1).lower())
+    return f"20{m.group(2)}-{mon}" if mon else None
+
+
+def _period_from_subject(subject: str) -> str | None:
+    """Parse YYYY-MM from an email subject like 'Bank statement February 2026'."""
+    return _period_from_filename(subject)
+
+
 def _period_from_epoch(epoch_ms: int) -> str:
     """Infer period from email date — statements arrive after their period closes."""
     d     = date.fromtimestamp(epoch_ms / 1000)
@@ -122,9 +147,9 @@ def _upload_to_gcs(csv_path: Path, period: str) -> str:
 # R:\ drop folder
 # ---------------------------------------------------------------------------
 
-def _write_to_drop(csv_path: Path, cfg: dict) -> Path | None:
+def _write_to_drop(csv_path: Path, cfg) -> Path | None:
     """Copy CSV to R:\\<r_folder>\\drop\\. Returns destination path or None on failure."""
-    drop_dir = _R_DRIVE / cfg["r_folder"] / "drop"
+    drop_dir = _R_DRIVE / cfg.r_folder / "drop"
     try:
         drop_dir.mkdir(parents=True, exist_ok=True)
         dest = drop_dir / csv_path.name
@@ -139,7 +164,7 @@ def _write_to_drop(csv_path: Path, cfg: dict) -> Path | None:
 # BookkeepingAgent trigger
 # ---------------------------------------------------------------------------
 
-def _run_bookkeeping(csv_path: Path, period: str, cfg: dict) -> dict:
+def _run_bookkeeping(csv_path: Path, period: str, cfg) -> dict:
     from agents.bookkeeping import BookkeepingAgent
     from agents.base import TaskRequest, TaskType
 
@@ -147,10 +172,10 @@ def _run_bookkeeping(csv_path: Path, period: str, cfg: dict) -> dict:
         task_type=TaskType.BOOKKEEPING_RUN,
         payload={
             "csv_path":        str(csv_path),
-            "account_no":      cfg["account_no"],
-            "gl_bank_account": cfg["gl_bank_account"],
+            "account_no":      cfg.account_masked,
+            "gl_bank_account": cfg.gl_bank_account,
             "period":          period,
-            "client_id":       cfg["client_id"],
+            "client_id":       cfg.client_id,
             "queue_reviews":   True,
             "notify_chat":     False,
         },
@@ -166,15 +191,15 @@ def _process_pdf(
     pdf_path: Path,
     fname: str,
     epoch_ms: int,
+    subject: str,
     period_override: str | None,
-    cfg: dict,
+    registry: dict,
+    pinned,
     dry_run: bool,
 ) -> dict:
     from sage50.statement_extractor import BankStatementExtractor
-    from sage50.bank_statement_ocr_parser import write_csv
-
-    period = period_override or _period_from_filename(fname) or _period_from_epoch(epoch_ms)
-    print(f"    Period : {period}")
+    from sage50.bank_statement_ocr_parser import write_csv, extract_account_no
+    from core.client_registry import resolve, normalize_account
 
     # Step 1 — Extract text (PyMuPDF → pdfplumber → Document AI cascade).
     # Digital PDFs exit at PyMuPDF in ~50 ms; only scanned PDFs reach DocAI.
@@ -187,6 +212,37 @@ def _process_pdf(
 
     if not ext.text.strip():
         return {"error": "all extraction paths produced empty text — check PDF quality / DocAI processor"}
+
+    # Period: prefer the statement's own closing date (authoritative), then
+    # filename/subject hints, then the email-arrival heuristic as last resort.
+    period = (
+        period_override
+        or _period_from_text(ext.text)
+        or _period_from_filename(fname)
+        or _period_from_subject(subject)
+        or _period_from_epoch(epoch_ms)
+    )
+    print(f"    Period : {period}")
+
+    # Step 1b — Resolve which client this statement belongs to (route by the
+    # account number printed on the statement). Never book until resolved.
+    parsed = extract_account_no(ext.text)
+    if pinned is not None:
+        # Manual --client pin: refuse if the statement's account contradicts it.
+        if parsed and normalize_account(parsed) != pinned.account_no:
+            print(f"    Client : UNROUTED — parsed account {parsed} ≠ pinned "
+                  f"{pinned.client_id} ({pinned.account_masked})")
+            return {"unrouted": True, "reason": "account mismatch vs pinned --client",
+                    "parsed_account": parsed, "fname": fname}
+        cfg = pinned
+    else:
+        cfg = resolve(ext.text, registry)
+        if cfg is None:
+            shown = parsed or "unreadable"
+            print(f"    Client : UNROUTED — no client matches account {shown}")
+            return {"unrouted": True, "reason": "no client matches parsed account",
+                    "parsed_account": parsed, "fname": fname}
+    print(f"    Client : {cfg.r_folder}  ({cfg.account_masked})")
 
     # Step 2 — Write CSV (transactions already parsed during extraction)
     bank     = ext.bank_code
@@ -246,7 +302,8 @@ def _process_message(
     notifier,
     msg: dict,
     period_override: str | None,
-    cfg: dict,
+    registry: dict,
+    pinned,
     dry_run: bool,
 ) -> None:
     print(f"\n{'─' * 60}")
@@ -254,7 +311,7 @@ def _process_message(
     print(f"  Subject: {msg['subject']}")
     print(f"  PDFs   : {[a['filename'] for a in msg['attachments']]}")
 
-    all_ok = True
+    results: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="vtx_") as tmp:
         tmp_path = Path(tmp)
         for att in msg["attachments"]:
@@ -264,29 +321,62 @@ def _process_message(
                     msg["msg_id"], att["attachment_id"], att["filename"], tmp_path
                 )
                 result = _process_pdf(
-                    pdf_path, att["filename"], msg["epoch_ms"],
-                    period_override, cfg, dry_run,
+                    pdf_path, att["filename"], msg["epoch_ms"], msg.get("subject", ""),
+                    period_override, registry, pinned, dry_run,
                 )
                 if "error" in result:
                     print(f"  ERROR: {att['filename']}: {result['error']}")
-                    all_ok = False
             except Exception as exc:
+                result = {"error": str(exc), "fname": att["filename"]}
                 print(f"  ERROR: {att['filename']}: {exc}")
-                all_ok = False
+            results.append(result)
 
-    if not dry_run:
-        if all_ok:
-            notifier.mark_read(msg["msg_id"])
-            print(f"\n  Marked read + labelled vtx-processed.")
-        else:
-            print(f"\n  Errors occurred — email left unread for retry.")
+    unrouted   = [r for r in results if r.get("unrouted")]
+    all_booked = all("error" not in r and not r.get("unrouted") for r in results)
+
+    if dry_run:
+        if unrouted:
+            print(f"\n  [dry-run] {len(unrouted)} attachment(s) UNROUTED — "
+                  f"would label '{_UNROUTED_LABEL}' + send Chat alert.")
+        return
+
+    if unrouted:
+        _quarantine(notifier, msg, unrouted)
+    if all_booked:
+        notifier.mark_read(msg["msg_id"])
+        print(f"\n  Marked read + labelled vtx-processed.")
+    else:
+        print(f"\n  Email left unread for retry.")
+
+
+def _quarantine(notifier, msg: dict, unrouted: list[dict]) -> None:
+    """Label an unrouted email and alert via Google Chat (best-effort)."""
+    from core.chat_notifier import send_alert
+
+    try:
+        notifier.apply_label(msg["msg_id"], _UNROUTED_LABEL)
+        print(f"\n  Labelled '{_UNROUTED_LABEL}' (left unread for retry).")
+    except Exception as exc:
+        print(f"\n  [warn] could not apply '{_UNROUTED_LABEL}' label: {exc}")
+
+    lines = [
+        f"From: {msg['from']}",
+        f"Subject: {msg['subject']}",
+    ]
+    for r in unrouted:
+        lines.append(
+            f"{r.get('fname', '?')}: account {r.get('parsed_account') or 'unreadable'} "
+            f"— {r.get('reason', 'no client match')}"
+        )
+    lines.append("Add the account to R:\\bookkeeping\\client_accounts.csv to route it.")
+    send_alert("VTX-OS: unrouted bank statement", lines)
 
 
 # ---------------------------------------------------------------------------
 # Poll loop
 # ---------------------------------------------------------------------------
 
-def poll_once(notifier, period_override: str | None, cfg: dict, dry_run: bool) -> int:
+def poll_once(notifier, period_override: str | None, registry: dict, pinned, dry_run: bool) -> int:
     msgs = notifier.poll_for_pdf_attachments()
     if not msgs:
         print("  No unread bank statement emails.")
@@ -294,33 +384,45 @@ def poll_once(notifier, period_override: str | None, cfg: dict, dry_run: bool) -
     print(f"  Found {len(msgs)} message(s) with PDF attachments.")
     for msg in msgs:
         try:
-            _process_message(notifier, msg, period_override, cfg, dry_run)
+            _process_message(notifier, msg, period_override, registry, pinned, dry_run)
         except Exception as exc:
             print(f"  ERROR on {msg.get('msg_id', '?')}: {exc}")
     return len(msgs)
 
 
 def run_daemon(
-    client_slug: str,
+    client_slug: str | None,
     period: str | None,
     interval: int,
     once: bool,
     dry_run: bool,
 ) -> None:
     from core.gmail_notifier import GmailNotifier
+    from core.client_registry import load_registry, registry_path
 
-    cfg      = _resolve_client(client_slug)
+    try:
+        registry = load_registry()
+    except FileNotFoundError as exc:
+        raise SystemExit(str(exc))
+    if not registry:
+        raise SystemExit(f"Client registry is empty: {registry_path()}")
+
+    pinned   = _pin_client(registry, client_slug) if client_slug else None
     notifier = GmailNotifier()
 
     print("VTX-OS Gmail Watcher")
-    print(f"  Client  : {client_slug}  ({cfg['r_folder']})")
+    print(f"  Registry: {registry_path()}  ({len(registry)} client account(s))")
+    if pinned is not None:
+        print(f"  Client  : PINNED {pinned.client_id}  ({pinned.r_folder})")
+    else:
+        print(f"  Client  : auto-route by statement account number")
     print(f"  Period  : {period or 'auto-detect from filename / email date'}")
     print(f"  Mode    : {'once' if once else f'daemon, poll every {interval}s'}")
     print(f"  Dry run : {dry_run}\n")
 
     while True:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Checking inbox...")
-        poll_once(notifier, period, cfg, dry_run)
+        poll_once(notifier, period, registry, pinned, dry_run)
         if once:
             break
         print(f"  Sleeping {interval}s...")
@@ -333,8 +435,9 @@ def run_daemon(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VTX-OS Gmail bank statement watcher")
-    parser.add_argument("--client",   required=True,
-                        help="Client slug, e.g. concetta")
+    parser.add_argument("--client",   default=None,
+                        help="Optional: pin to one client slug (e.g. concetta). "
+                             "Omit to auto-route every statement by its account number.")
     parser.add_argument("--period",   default=None,
                         help="Override period detection, e.g. 2026-02")
     parser.add_argument("--once",     action="store_true",

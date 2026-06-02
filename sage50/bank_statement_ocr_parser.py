@@ -60,6 +60,32 @@ def detect_bank(text: str) -> BankCode:
     return BankCode.GENERIC
 
 
+# Branch-account number printed on TD statements, e.g. "1890-5315443".
+# Same form used by the legacy pdf_extractor; kept here so the new extraction
+# path can derive a routing key without depending on the legacy module.
+_ACCOUNT_NO_RE = re.compile(r"\b(\d{4}-\d{7})\b")
+
+
+def extract_account_no(text: str) -> str | None:
+    """Return the bank account number found in OCR text as normalized digits.
+
+    The number is the routing key for matching a statement to a client. On TD
+    statements it appears as "BRANCH-ACCOUNT" (e.g. "1890-5315443") and is
+    repeated on every cheque image, so the *most frequent* match is chosen —
+    this is robust against OCR typos like "1840-5315443" / "1890-5315445".
+
+    Returns digits only (e.g. "18905315443"), or None when no account number is
+    found. TD-format today; extend _ACCOUNT_NO_RE per bank as needed.
+    """
+    from collections import Counter
+
+    matches = _ACCOUNT_NO_RE.findall(text)
+    if not matches:
+        return None
+    best, _ = Counter(matches).most_common(1)[0]
+    return best.replace("-", "")
+
+
 # ---------------------------------------------------------------------------
 # Internal transaction record
 # ---------------------------------------------------------------------------
@@ -316,11 +342,31 @@ def _guess_direction(desc: str) -> str | None:
 # Line-by-line transaction parser
 # ---------------------------------------------------------------------------
 
+def _date_from_wrapped_line(raw: str, year: int) -> date | None:
+    """Return a date if *raw* is a bare date token carrying no amount.
+
+    Recovers TD OCR row-splits where a transaction's date wrapped onto the
+    following line on its own (the amount stayed on the prior line), e.g.
+    "MONTHLY PLAN FEE  19.00" then "FEB27". A real transaction or balance line
+    always carries an amount, so requiring none here avoids stealing those.
+    """
+    line = raw.strip()
+    if not line or len(line) > 12 or _AMOUNT_RE.search(line):
+        return None
+    d, _ = _try_parse_date(line, year)
+    if d is None:
+        d, _, _ = _try_find_date_mid(line, year)
+    return d
+
+
 def _parse_lines(lines: list[str], year: int) -> list[_Txn]:
     transactions: list[_Txn] = []
     prev_balance: Decimal | None = None
 
-    for raw in lines:
+    i, n = 0, len(lines)
+    while i < n:
+        raw = lines[i]
+        i += 1
         line = raw.strip()
         if len(line) < 6:
             continue
@@ -347,6 +393,13 @@ def _parse_lines(lines: list[str], year: int) -> list[_Txn]:
             if txn_date is not None:
                 # Combine before + after so amount extraction still works.
                 rest = before + "  " + after
+            elif _extract_amounts(line) and i < n and (
+                (wrapped := _date_from_wrapped_line(lines[i], year)) is not None
+            ):
+                # OCR row-split: date wrapped onto the next (bare) line. Adopt it
+                # and consume that line so it is not reprocessed.
+                txn_date, rest = wrapped, line
+                i += 1
             else:
                 continue
 

@@ -1,5 +1,5 @@
 # PROJECT_STATUS.md — Vertex AI Accounting OS
-# Updated: 2026-05-29  |  Session: 14  (Phase 2 close-out: extractor wired in + extraction-layer hardening)
+# Updated: 2026-06-01  |  Session: 15  (Multi-client routing + period/OCR row-split fixes)
 # Trace: vtx-os-proj-001
 
 ## CURRENT PHASE
@@ -470,6 +470,8 @@ Session 12: diagnosed and fixed 0-transaction failure for Concetta Feb 2026 stat
 - BookkeepingAgent: 18 auto-categorized | 15 needs review
 - One missing transaction: MONTHLY PLAN FEE $19.00 (page 2 layout edge case — will surface in GL recon)
 - 97% recall (33/34) — acceptable for scanned PDF via batch OCR
+- [FIXED in Session 15, 2026-06-01] The $19.00 fee was an OCR row-split (date wrapped
+  to a bare next line). Now recovered → 34/34. See Session 15 changes below.
 
 ## SESSION 13 CHANGES  [2026-05-28]
 
@@ -565,6 +567,88 @@ hardened the extraction layer. Surgical changes only — no stable module rewrit
   - `python scripts/gmail_watcher.py --client concetta --period 2026-02 --dry-run`
   - `python -c "from sage50.statement_extractor import benchmark; benchmark('<digital TD .pdf>')"`
     Expect ~50 ms PyMuPDF vs ~40 s DocAI on a digital statement.
+
+## SESSION 15 CHANGES  [2026-06-01]
+Multi-client routing for the Gmail bank-statement watcher, plus two bug fixes
+surfaced while validating the Concetta Feb 2026 statement live. Gmail OAuth was
+re-authed (token had expired) — credentials version 3 stored in Secret Manager.
+
+### 1 — Multi-client routing (route incoming statements to the right client)
+Until now the watcher was single-client: a required `--client` flag + a hardcoded
+`_CLIENT_CONFIGS` dict (only `concetta`) applied to every inbox PDF. Now each
+statement is routed by the **bank account number printed on the statement**,
+matched against a maintained CSV registry on R:.
+
+- **`sage50/bank_statement_ocr_parser.py`** — added `extract_account_no(text) -> str | None`.
+  Reuses the legacy `\b(\d{4}-\d{7})\b` regex; `Counter.most_common` picks the most
+  frequent match (robust against per-cheque OCR typos). Returns digits-only
+  (e.g. `18905315443`) or None. TD-format today; extension point for other banks.
+- **`core/client_registry.py`** (NEW) — replaces the hardcoded dict.
+  `@dataclass ClientConfig(account_no, r_folder, client_id, gl_bank_account, bank,
+  sender_email)` with `account_masked` property (`xxxx<last4>`).
+  `load_registry()` reads `R:\bookkeeping\client_accounts.csv` (env override
+  `VTX_CLIENT_REGISTRY`), keyed by normalized full account digits; validates
+  required columns; raises FileNotFoundError (with create-instructions) if absent.
+  `resolve(text, registry)` → ClientConfig | None.
+  CSV columns: `account_no,r_folder,client_id,gl_bank_account,bank,sender_email`.
+  Seeded with the Concetta row (account 1890-5315443 → Concetta Enterprises Inc).
+- **`core/gmail_notifier.py`** — added `apply_label(msg_id, label_name)`: applies a
+  label WITHOUT removing UNREAD (quarantine; reuses `_get_or_create_label`).
+- **`core/chat_notifier.py`** — added `send_alert(title, lines)`: simple titled
+  Cards v2 text alert; degrades gracefully if webhook unset/POST fails.
+- **`scripts/gmail_watcher.py`** — deleted `_CLIENT_CONFIGS`/`_resolve_client`;
+  loads the registry once at startup (fail fast if missing/empty). `--client` is now
+  OPTIONAL (manual pin/override for testing). In `_process_pdf`, after extraction it
+  resolves the client from the parsed account:
+    - Auto mode: unique match → use it; no match/unreadable → unrouted sentinel.
+    - Pinned mode (`--client`): mismatch guard — parsed account ≠ pinned → unrouted.
+  Unrouted attachments → `apply_label(..., "vtx-unrouted")` + Chat alert, email
+  left UNREAD for retry; `mark_read` only when ALL attachments book OK. Never
+  mis-books one client into another's GL.
+- **`tests/client_routing_smoke.py`** (NEW) — 10/10 offline checks (temp CSV +
+  embedded TD fixture + cached real Jan OCR → 18905315443).
+
+### 2 — Period detection fix (`scripts/gmail_watcher.py`)
+The Feb statement was tagged `2026-04`: filename `HWY 7 & PINEVALLEY.pdf` has no
+date, so it fell through to the email-arrival heuristic (statement arrived late).
+- Added `_period_from_text()` — parses TD's `Statement From - To` range
+  (e.g. `JAN 30/26 - FEB 27/26`) and returns the CLOSING (To) month/year.
+  Authoritative.
+- Added `_period_from_subject()` — parses `February 2026` from the email subject.
+- Period computation moved to AFTER extraction (needs OCR text). New precedence:
+  `override → statement text → filename → subject → email-date`.
+- Result: Feb → `2026-02` (CSV `HWY_7___PINEVALLEY-2026-02.csv`).
+
+### 3 — Feb $19 MONTHLY PLAN FEE OCR row-split fix (`sage50/bank_statement_ocr_parser.py`)
+The 18 MB Feb scan wrapped one transaction's date onto its own line — the amount
+stayed above, the date `FEB27` landed on a bare following line — so the fee was
+dropped (the resolved "97% recall, 33/34" from Session 12).
+- Added `_date_from_wrapped_line()`: returns a date only if the line is a bare
+  date token carrying NO amount (`_AMOUNT_RE` requires 2 decimals, so day digits
+  don't match). Real txn/balance lines always have an amount, so they're not stolen.
+- `_parse_lines` switched to an indexed loop: when a line has a description+amount
+  but no date AND the next line is a bare wrapped date, it adopts that date and
+  consumes the line.
+- Result: Feb now parses **34** transactions with the $19.00 debit on 2026-02-27.
+- Regression check added to `tests/statement_extractor_smoke.py` (now 10/10).
+
+### Live validation (this session)
+- Gmail re-authed (creds v3). `python scripts/gmail_watcher.py --once --dry-run`
+  (no `--client`): Feb statement auto-routed to Concetta Enterprises Inc (xxxx5443)
+  from the parsed account, period `2026-02`, **34 transactions** parsed. Dry-run
+  correctly skipped R:\, GCS, and BookkeepingAgent.
+- No regressions: Jan still 37 txns; statement_extractor_smoke 10/10;
+  client_routing_smoke 10/10.
+
+### Notes / follow-ups
+- Registry currently holds 1 client (Concetta). To onboard more, append rows to
+  `R:\bookkeeping\client_accounts.csv` — no code change needed.
+- `extract_account_no` and `_period_from_text` are TD-format; generalize per bank
+  as non-TD clients onboard.
+- New clients without a dedicated ruleset fall back to DEFAULT_RULES in
+  BookkeepingAgent — per-client rules needed at scale.
+- All Session 15 changes are LOCAL (uncommitted). Feb statement ready for a real
+  (non-dry) booking run when desired.
 
 ## NEXT STEPS
 Phase 2 complete and wired. Phase 3 options:

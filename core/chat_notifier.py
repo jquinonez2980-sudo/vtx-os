@@ -84,6 +84,39 @@ def notify_pending_reviews(
         return False
 
 
+def send_alert(title: str, lines: list[str]) -> bool:
+    """Post a simple titled text alert to Google Chat. Returns True on success.
+
+    Degrades gracefully: if the webhook is unconfigured or the POST fails, it
+    logs to stderr and returns False so callers can keep running.
+    """
+    url = _webhook_url()
+    if not url:
+        print(
+            f"[chat_notifier] Webhook not configured — skipping alert: {title}",
+            file=sys.stderr,
+        )
+        return False
+
+    body = "\n".join(f"• {ln}" for ln in lines)
+    payload = {
+        "cardsV2": [{
+            "cardId": f"vtx-alert-{uuid.uuid4().hex[:8]}",
+            "card": {
+                "header": {"title": title},
+                "sections": [{"widgets": [{"textParagraph": {"text": body}}]}],
+            },
+        }]
+    }
+    try:
+        resp = httpx.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"[chat_notifier] Alert POST failed: {exc}", file=sys.stderr)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Card builder
 # ---------------------------------------------------------------------------

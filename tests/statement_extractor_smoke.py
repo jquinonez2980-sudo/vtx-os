@@ -128,6 +128,20 @@ def main() -> int:
         se._PATH_FNS = orig_fns
         pdf_path.unlink(missing_ok=True)
 
+    # 9 — OCR row-split recovery: a TD scan can wrap a transaction's date onto
+    # its own bare line (amount stays above). The fee must still be captured.
+    wrap_text = (
+        "BALANCE FORWARD  JAN30  5,000.00\n"
+        "MONTHLY PLAN FEE  19.00\n"
+        "FEB27\n"
+    )
+    wrap = parse_ocr_text(wrap_text, bank=BankCode.TD)
+    check(
+        "wrapped date row-split captures the fee",
+        len(wrap) == 1 and wrap[0].debit == Decimal("19.00")
+        and wrap[0].txn_date.month == 2 and wrap[0].txn_date.day == 27,
+    )
+
     # 6 — sign convention
     txns = _txns_to_bank_transactions(
         [
