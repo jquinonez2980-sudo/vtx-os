@@ -264,43 +264,79 @@ namespace Sage50Bridge
             }
         }
 
-        private string ExportGl()
+        // Journal entry storage spans multiple fiscal years, each in its own
+        // header+detail table pair:
+        //   current year : header tjourent  + detail tjentact
+        //   prior years  : header tjeh0N    + detail tjeah0N   (N=01..05, newest→oldest)
+        // Header columns: lId (PK, = detail.lJEntId), dtJourDate (accounting/transaction
+        // date), sSource (source code), sComment (description).
+        //
+        // IMPORTANT: filter on dtJourDate, NOT dtASDate. dtASDate is the data-entry
+        // timestamp (when the row was keyed in), which is wrong for period reconciliation
+        // — e.g. a 2026-02-27 bank charge entered on 2026-06-02 has dtASDate=2026-06-02
+        // but dtJourDate=2026-02-27. The earlier code used tjeh01+dtASDate, so it only
+        // ever saw archived fiscal-year-1 entry timestamps and never the current year.
+        private static readonly string[][] _GlYearTables =
         {
-            // tjeh01 = journal entry header: lId (PK, FK for tjentact.lJEntId),
-            //   dtASDate = transaction date, sSource = source code, sComment = description
-            string baseSelect =
-                "SELECT h.lId AS lJEntID, h.dtASDate AS txnDate, " +
+            new[] { "tjourent", "tjentact" },                       // current fiscal year
+            new[] { "tjeh01", "tjeah01" }, new[] { "tjeh02", "tjeah02" },
+            new[] { "tjeh03", "tjeah03" }, new[] { "tjeh04", "tjeah04" },
+            new[] { "tjeh05", "tjeah05" },                          // archived prior years
+        };
+
+        private static string GlSubSelect(string header, string detail, string whereClause)
+        {
+            return
+                "SELECT h.lId AS lJEntID, h.dtJourDate AS txnDate, " +
                 "h.sSource, h.sComment AS hdrComment, " +
                 "jl.nLineNum, jl.lAcctId, jl.dAmount, jl.szComment " +
-                "FROM tjeh01 h " +
-                "JOIN tjentact jl ON jl.lJEntId = h.lId ";
+                "FROM " + header + " h JOIN " + detail + " jl ON jl.lJEntId = h.lId" +
+                (whereClause.Length > 0 ? " WHERE " + whereClause : "");
+        }
 
-            string df  = DateFilter("h.dtASDate");
-            string sql = baseSelect + "WHERE " + df + " ORDER BY h.dtASDate";
+        private string GlUnion(string whereClause)
+        {
+            var parts = new List<string>();
+            foreach (string[] hd in _GlYearTables)
+                parts.Add(GlSubSelect(hd[0], hd[1], whereClause));
+            return string.Join(" UNION ALL ", parts) + " ORDER BY txnDate";
+        }
+
+        private string ExportGl()
+        {
+            string df = DateFilter("h.dtJourDate");
             try
             {
-                string result = QueryJson(sql);
-                // Zero rows with a date filter means entries may have been stored by Sage 50
-                // with fiscal-adjusted dates outside the requested range (e.g. "date precedes
-                // Fiscal Start" causes entries to land on the prior fiscal year-end date).
-                // Retry without the date filter so the caller still sees the entries.
+                string result = QueryJson(GlUnion(df));
+                // A genuinely empty period in every year — Sage 50 can store year-end
+                // adjustments on the fiscal year-end date. Retry unfiltered so the caller
+                // still sees the entries (Python-side dedup keys won't match other periods).
                 if (HasDates() && result == "[]")
                 {
                     Console.Error.WriteLine(
-                        "GL date-filtered query returned 0 rows — retrying without date filter. " +
+                        "GL date-filtered union returned 0 rows — retrying without date filter. " +
                         "Check Sage 50 fiscal year start date (Setup > Company Information).");
-                    try { return QueryJson(baseSelect + "ORDER BY h.dtASDate"); }
+                    try { return QueryJson(GlUnion("")); }
                     catch { }
                 }
                 return result;
             }
+            catch (Exception ex)
+            {
+                // A prior-year table may be absent in some company files — fall back to
+                // the current fiscal year alone, which is what monthly close needs.
+                Console.Error.WriteLine(
+                    "GL union query failed (" + ex.Message + ") — current-year-only fallback.");
+            }
+
+            try { return QueryJson(GlSubSelect("tjourent", "tjentact", df) + " ORDER BY txnDate"); }
             catch { }
 
-            // Last-resort fallback: raw GL lines (no header join, no dates)
+            // Last-resort fallback: raw current-year detail lines (no header, no dates)
             try { return QueryJson("SELECT * FROM tjentact"); }
             catch { }
 
-            return Error("GL: JOIN with tjeh01 failed.");
+            return Error("GL: JOIN across tjourent/tjeh0N failed.");
         }
 
         private string ExportAr()

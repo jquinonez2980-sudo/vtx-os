@@ -256,9 +256,12 @@ def _map_vendor(r: dict) -> Vendor:
 
 # ---------------------------------------------------------------------------
 # GL Transactions
-# Bridge query: tjourent JOIN <date-source> JOIN tjentact (see Program.cs ExportGl)
-# Result columns: lJEntID, txnDate, nLineNum, lAcctId, dAmount, szComment
-# Fallback result (no date JOIN found): tjentact flat (no txnDate)
+# Bridge query: UNION of current-year (tjourent+tjentact) and archived-year
+# (tjeh0N+tjeah0N) journals, filtered on dtJourDate — the accounting date, not
+# dtASDate the data-entry timestamp (see Program.cs ExportGl).
+# Result columns: lJEntID, txnDate, sSource, hdrComment, nLineNum, lAcctId,
+#                 dAmount, szComment
+# Fallback result (union fails): current-year only, then tjentact flat (no txnDate)
 #
 # dAmount sign convention: positive = debit, negative = credit
 # ---------------------------------------------------------------------------
