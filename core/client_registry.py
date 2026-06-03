@@ -2,9 +2,8 @@
 core/client_registry.py
 Maps an incoming bank statement to the client it belongs to.
 
-The routing key is the bank account number printed on the statement (parsed by
-sage50.bank_statement_ocr_parser.extract_account_no). It is matched against a
-maintained CSV registry that lives with the client data on the R: drive:
+The routing key is the bank account number printed on the statement, matched
+against a maintained CSV registry that lives with the client data on the R: drive:
 
     R:\\bookkeeping\\client_accounts.csv
 
@@ -13,7 +12,9 @@ maintained CSV registry that lives with the client data on the R: drive:
 
 - account_no may be written with or without separators; it is normalized to
   digits and keyed on the FULL number (not last-4) to avoid collisions across
-  the ~125 clients.
+  the ~125 clients. Routing is bank-agnostic: rather than guess each bank's
+  account format, resolve() searches the statement for any *registered* account
+  number (see find_account_in_text) — so new banks need no code change.
 - r_folder is the client's folder under R:\\ (drives the drop path + identity).
 - client_id selects the categorization ruleset in BookkeepingAgent.
 - gl_bank_account is the Sage GL code for the bank (reserved for journal entries).
@@ -35,11 +36,16 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from sage50.bank_statement_ocr_parser import extract_account_no
-
 DEFAULT_REGISTRY_CSV = Path(r"R:\bookkeeping\client_accounts.csv")
 
 _REQUIRED_COLUMNS = {"account_no", "r_folder", "client_id", "gl_bank_account"}
+
+# A candidate account token in OCR text: a run of digits allowing a single
+# space or dash between consecutive digits (e.g. "1890-5315443", "3632 8961-555").
+# A single separator only — column gaps in reconstructed OCR rows are 2+ spaces,
+# so this never merges across unrelated numbers.
+_ACCT_CANDIDATE_RE = re.compile(r"\d(?:[ \-]?\d){4,}")
+_MAX_TRANSIT_PREFIX = 4  # extra leading/trailing digits tolerated around a known account
 
 
 def registry_path() -> Path:
@@ -111,9 +117,53 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
     return registry
 
 
+def find_account_in_text(
+    text: str, registry: dict[str, ClientConfig]
+) -> str | None:
+    """Return the registered account number that appears in the statement text.
+
+    Bank-agnostic by design: instead of guessing each bank's account format, we
+    search the OCR text for any account we already know (the registry keys). The
+    statement is tokenised into digit runs (single space/dash separators allowed),
+    each normalised to digits, and compared to known accounts:
+
+      - EXACT token == account  → strongest evidence (also robust on TD, where the
+        account repeats on every cheque image; OCR-typo variants aren't registered
+        so they simply don't match).
+      - account embedded in a slightly longer token (≤ _MAX_TRANSIT_PREFIX extra
+        digits) → weaker evidence, covers a printed transit/branch prefix.
+
+    Exact evidence outranks embedded. Repeats of a SINGLE account are expected and
+    fine; if two *different* registered clients appear, the statement is ambiguous
+    and we return None — better to quarantine than book one client's GL into
+    another. Returns the normalized account key, or None.
+    """
+    if not text or not registry:
+        return None
+    known = set(registry.keys())
+
+    exact: set[str] = set()
+    embedded: set[str] = set()
+    for token in _ACCT_CANDIDATE_RE.findall(text):
+        digits = normalize_account(token)
+        if len(digits) < 5:
+            continue
+        if digits in known:
+            exact.add(digits)
+            continue
+        for acct in known:
+            if acct in digits and 0 < len(digits) - len(acct) <= _MAX_TRANSIT_PREFIX:
+                embedded.add(acct)
+
+    for distinct in (exact, embedded):  # exact evidence first
+        if len(distinct) == 1:
+            return next(iter(distinct))
+        if len(distinct) > 1:
+            return None  # two different clients present — ambiguous, quarantine
+    return None
+
+
 def resolve(text: str, registry: dict[str, ClientConfig]) -> ClientConfig | None:
     """Resolve OCR statement text to a ClientConfig, or None when no match."""
-    acct = extract_account_no(text)
-    if not acct:
-        return None
-    return registry.get(normalize_account(acct))
+    acct = find_account_in_text(text, registry)
+    return registry.get(acct) if acct else None

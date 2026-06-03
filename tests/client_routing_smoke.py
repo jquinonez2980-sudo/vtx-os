@@ -3,7 +3,7 @@ tests/client_routing_smoke.py
 Offline smoke test for multi-client routing (Session 14).
 
 OFFLINE: no Gmail / GCP calls. Exercises the routing key extractor and the
-CSV-backed client registry against a temporary CSV and an embedded TD fixture.
+CSV-backed client registry against a temporary CSV and embedded TD + BMO fixtures.
 If the cached real OCR (data/test-client/bank_statment_january_2026-ocr.txt)
 is present, it is also fed through extract_account_no for a real-data check.
 
@@ -18,6 +18,10 @@ Checks:
    8   mismatch: a different account in text does not resolve to Concetta
    9   load_registry raises FileNotFoundError for a missing CSV
   10   (optional) cached real Jan OCR -> 18905315443
+  11   bank-agnostic: a BMO-format statement routes to the BMO client (no TD regex)
+  12   find_account_in_text returns the matched registry key
+  13   amounts/dates that look numeric do not false-match an account
+  14   ambiguous: a statement naming TWO clients resolves to None (quarantine)
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sage50.bank_statement_ocr_parser import extract_account_no
 from core.client_registry import (
     ClientConfig,
+    find_account_in_text,
     load_registry,
     normalize_account,
     resolve,
@@ -62,6 +67,20 @@ OTHER_TEXT = "Account No. 2222-7654321\nBALANCE FORWARD 50.00\n"
 
 NOISE_TEXT = ("the quick brown fox jumps over the lazy dog " * 30) + "\n"
 
+# Second client on a DIFFERENT bank, printed in BMO's account format. The TD
+# regex (\d{4}-\d{7}) cannot match this — only the registry-driven search can.
+THEO_ACCT = "3632 8961-555"
+THEO_DIGITS = "36328961555"
+BMO_TEXT = (
+    "BMO Bank of Montreal\n"
+    "Primary Chequing Account statement\n"
+    f"Account number  {THEO_ACCT}\n"
+    "Opening balance                 2,500.00\n"
+    "01/15/2026  PAYROLL DEPOSIT      3,200.00\n"   # numeric noise, must not match
+    f"Account number  {THEO_ACCT}\n"
+    "Closing balance                 5,700.00\n"
+)
+
 CACHED_OCR = (
     Path(__file__).resolve().parents[1]
     / "data" / "test-client" / "bank_statment_january_2026-ocr.txt"
@@ -90,6 +109,8 @@ def _seed_csv(path: Path) -> None:
     path.write_text(
         "account_no,r_folder,client_id,gl_bank_account,bank,sender_email\n"
         f"{CONCETTA_ACCT},Concetta Enterprises Inc,concetta,1060,TD,"
+        "veromendez87@hotmail.com\n"
+        f"{THEO_ACCT},Canadian Federation of theotherapy,theotherapy,1060,BMO,"
         "veromendez87@hotmail.com\n",
         encoding="utf-8",
     )
@@ -139,6 +160,48 @@ def main() -> int:
 
         # 8 — unknown valid account resolves to None (mismatch / quarantine)
         check("resolve(other account) -> None", resolve(OTHER_TEXT, registry) is None)
+
+        # 11 — bank-agnostic: a BMO-format statement routes to the BMO client.
+        # The TD regex can't see this account; only the registry search can.
+        check(
+            "extract_account_no(BMO) -> None (TD regex blind to BMO format)",
+            extract_account_no(BMO_TEXT) is None,
+        )
+        theo = resolve(BMO_TEXT, registry)
+        check(
+            "resolve(BMO statement) -> theotherapy",
+            theo is not None and theo.client_id == "theotherapy"
+            and theo.r_folder == "Canadian Federation of theotherapy",
+        )
+
+        # also: TD statement still routes to Concetta with both clients registered
+        td = resolve(TD_TEXT, registry)
+        check(
+            "resolve(TD statement) -> concetta (no cross-talk)",
+            td is not None and td.client_id == "concetta",
+        )
+
+        # 12 — find_account_in_text returns the matched normalized key
+        check(
+            "find_account_in_text(BMO) -> 36328961555",
+            find_account_in_text(BMO_TEXT, registry) == THEO_DIGITS,
+        )
+
+        # 13 — numeric noise (amounts/dates) must not false-match an account
+        check(
+            "amounts/dates do not false-match",
+            find_account_in_text(
+                "Opening 2,500.00\n01/15/2026 PAYROLL 3,200.00\nClosing 5,700.00\n",
+                registry,
+            ) is None,
+        )
+
+        # 14 — a statement naming TWO registered clients is ambiguous -> quarantine
+        ambiguous = TD_TEXT + "\n" + f"Account number  {THEO_ACCT}\n"
+        check(
+            "resolve(two clients) -> None (quarantine)",
+            resolve(ambiguous, registry) is None,
+        )
 
     # 9 — missing CSV raises FileNotFoundError
     missing = Path(tempfile.gettempdir()) / "vtx_no_such_registry_xyz.csv"

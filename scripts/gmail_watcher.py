@@ -213,8 +213,8 @@ def _process_pdf(
     dry_run: bool,
 ) -> dict:
     from sage50.statement_extractor import BankStatementExtractor
-    from sage50.bank_statement_ocr_parser import write_csv, extract_account_no
-    from core.client_registry import resolve, normalize_account
+    from sage50.bank_statement_ocr_parser import write_csv
+    from core.client_registry import resolve, find_account_in_text
 
     # Step 1 — Extract text (PyMuPDF → pdfplumber → Document AI cascade).
     # Digital PDFs exit at PyMuPDF in ~50 ms; only scanned PDFs reach DocAI.
@@ -239,24 +239,25 @@ def _process_pdf(
     )
     print(f"    Period : {period}")
 
-    # Step 1b — Resolve which client this statement belongs to (route by the
-    # account number printed on the statement). Never book until resolved.
-    parsed = extract_account_no(ext.text)
+    # Step 1b — Resolve which client this statement belongs to (route by any
+    # registered account number printed on the statement; bank-agnostic). Never
+    # book until resolved.
+    matched = find_account_in_text(ext.text, registry)
     if pinned is not None:
-        # Manual --client pin: refuse if the statement's account contradicts it.
-        if parsed and normalize_account(parsed) != pinned.account_no:
-            print(f"    Client : UNROUTED — parsed account {parsed} ≠ pinned "
+        # Manual --client pin: refuse only if the statement positively matches a
+        # DIFFERENT registered client. A non-match (matched is None) trusts the pin.
+        if matched and matched != pinned.account_no:
+            print(f"    Client : UNROUTED — statement account {matched} ≠ pinned "
                   f"{pinned.client_id} ({pinned.account_masked})")
             return {"unrouted": True, "reason": "account mismatch vs pinned --client",
-                    "parsed_account": parsed, "fname": fname}
+                    "parsed_account": matched, "fname": fname}
         cfg = pinned
     else:
         cfg = resolve(ext.text, registry)
         if cfg is None:
-            shown = parsed or "unreadable"
-            print(f"    Client : UNROUTED — no client matches account {shown}")
-            return {"unrouted": True, "reason": "no client matches parsed account",
-                    "parsed_account": parsed, "fname": fname}
+            print(f"    Client : UNROUTED — no registered client matches this statement")
+            return {"unrouted": True, "reason": "no client matches statement account",
+                    "parsed_account": matched, "fname": fname}
     print(f"    Client : {cfg.r_folder}  ({cfg.account_masked})")
 
     # Step 2 — Write CSV (transactions already parsed during extraction)
