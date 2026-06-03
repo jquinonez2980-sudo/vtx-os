@@ -61,6 +61,7 @@ class ClientConfig:
     gl_bank_account: str
     bank: str = ""
     sender_email: str = ""
+    year_end_month: int = 0  # 1–12 (e.g. 4 = April 30 year-end); 0 = not set
 
     @property
     def account_masked(self) -> str:
@@ -94,6 +95,10 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
             acct = normalize_account(row.get("account_no", ""))
             if not acct:
                 continue
+            try:
+                year_end_month = int(row.get("year_end_month") or 0)
+            except (ValueError, TypeError):
+                year_end_month = 0
             registry[acct] = ClientConfig(
                 account_no=acct,
                 r_folder=(row.get("r_folder") or "").strip(),
@@ -101,6 +106,7 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
                 gl_bank_account=(row.get("gl_bank_account") or "").strip(),
                 bank=(row.get("bank") or "").strip(),
                 sender_email=(row.get("sender_email") or "").strip(),
+                year_end_month=year_end_month,
             )
     return registry
 
