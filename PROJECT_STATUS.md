@@ -1,5 +1,5 @@
 # PROJECT_STATUS.md — Vertex AI Accounting OS
-# Updated: 2026-06-01  |  Session: 15  (Multi-client routing + period/OCR row-split fixes)
+# Updated: 2026-06-03  |  Session: 16  (CHQ payee extraction + year-end worksheet generator)
 # Trace: vtx-os-proj-001
 
 ## CURRENT PHASE
@@ -647,20 +647,81 @@ dropped (the resolved "97% recall, 33/34" from Session 12).
   as non-TD clients onboard.
 - New clients without a dedicated ruleset fall back to DEFAULT_RULES in
   BookkeepingAgent — per-client rules needed at scale.
-- All Session 15 changes are LOCAL (uncommitted). Feb statement ready for a real
-  (non-dry) booking run when desired.
+- Session 15 changes committed (280207a) and pushed.
+
+## SESSION 16 CHANGES  [2026-06-03]
+Two major features: CHQ payee extraction from embedded cheque images, and the
+year-end worksheet generator for April 30 fiscal year-ends. Concetta's 2026
+year-end bookkeeping is complete; year-end worksheet generated and ready for
+adjusting entries.
+
+### 1 — CHQ payee extraction from cheque image pages  [commit 2899f75]
+TD Bank statements embed scanned cheque images after the transaction ledger.
+Previously CHQ entries only showed `CHQ#00788-1141529082` with no payee.
+
+- **`models/banking.py`** — added `payee: str | None = None` to `BankTransaction`
+- **`core/docai_ocr.py`** — refactored to support per-page text lists:
+    - `_page_texts_from_doc()` — new: same bounding-box reconstruction per page
+    - `_ocr_sync` / `_ocr_batch` now return `tuple[str, list[str]]`
+    - `ocr_pdf_bytes_with_pages()` / `ocr_pdf_file_with_pages()` — new public functions
+    - `_extract_pymupdf` page list fixed: `pages.append(t or "")` (not `if t:`) to preserve page index alignment
+- **`sage50/cheque_extractor.py`** (NEW):
+    - `ChequeInfo` — cheque_no, payee, amount, confidence (0.0–1.0)
+    - `_is_cheque_page()` — true if "Pay to" present and no ledger keywords (BALANCE FORWARD, etc.)
+    - `_parse_cheque_page()` — splits on "Pay to" occurrences for 2-cheque-per-page layout; MICR preferred over No. label for cheque number
+    - `extract_cheque_map(page_texts)` → `{cheque_no: ChequeInfo}` across all pages
+- **`sage50/statement_extractor.py`** — all three extract paths return 4-tuple (text, conf, pages, page_texts); `_enrich_cheque_payees()` mutates CHQ transaction descriptions in-place (`CHQ#00788` → `CHQ#00788 - Rogers Communications Inc.`); `payee` field populated from enriched description
+- **`sage50/categorization_rules.py`** — added `_CHEQUE_PAYEES` list (empty until first live run confirms payee names) and `_rule_cheque_payee` as priority-1 rule in ConcettaRuleset
+- **`scripts/gmail_watcher.py`** — added `_archive_pdf_to_gcs()`: uploads original PDF to `bank-statements/pdf/YYYY/MM/DD/{client_id}/` in GCS before temp cleanup
+- **`tests/cheque_extractor_smoke.py`** (NEW) — 26/26 checks: page classification, two-cheque parse, single cheque, garbled MICR, extract_cheque_map, ledger page exclusion
+
+### 2 — Year-end worksheet generator  [commits 21ca1dd, 9b9c168, aec9741]
+Concetta Enterprises Inc. fiscal year end: April 30, 2026. All bookkeeping complete.
+
+- **`core/client_registry.py`** — added `year_end_month: int = 0` (1–12; 0=unset) to `ClientConfig`; `load_registry()` reads optional column from CSV
+- **`R:\bookkeeping\client_accounts.csv`** — added `year_end_month` column; Concetta set to `4`
+- **`sage50/trial_balance_parser.py`** (NEW):
+    - `TBLine` — account_no, description, debit, credit (Decimal)
+    - `parse_trial_balance(csv_path)` — skips company-name preamble, handles header variants (`Account Number`, `Debits`, `Credits`), filters to posting accounts via `^\d{3,6}$`
+    - `find_tb_csv(drop_dir, period)` — locates `tb-{period}.csv` etc. with Sage 50 export instructions in error
+- **`core/year_end_worksheet.py`** (NEW):
+    - `populate_worksheet(template_path, output_path, client_name, year_end_date, tb_lines, prepared_by)` — openpyxl populates the professional template
+    - Writes Cover Sheet D8-D11 (D9 number_format overridden to General)
+    - Writes Worksheet cols A-D; cols E-M formulas never touched
+    - Deletes unused template formula rows (rows n+4 to 201) so TOTALS lands 2 rows after last account
+    - Rewrites TOTALS/Diff/BalanceCheck formulas with corrected row references
+    - Styling: alternating white/light-blue rows, navy header with white bold font, blue-grey TOTALS row, `#,##0.00` on all numeric columns, freeze top row, explicit column widths
+- **`scripts/year_end.py`** (NEW) — CLI `--client`, `--period`, `--tb-csv`, `--dry-run`; validates year_end_month match; saves to `R:\{r_folder}\Year End\{client_id}_yearend_{period}.xlsx`
+- **`tests/year_end_worksheet_smoke.py`** (NEW) — 20/20 checks: cover sheet values, worksheet data, row pruning, formula not overwritten, error handling
+
+### Live generation — Concetta 2026-04
+```
+python scripts/year_end.py --client concetta --period 2026-04 \
+  --tb-csv "R:\Concetta Enterprises Inc\Trial Balance 2026.csv"
+```
+- 47 posting accounts | TB Debit = TB Credit = $350,368.99 (perfectly balanced)
+- Output: `R:\Concetta Enterprises Inc\Year End\concetta_yearend_2026-04.xlsx`
+- Status: ready for adjusting entries in **2. Adjusting Entries** tab
 
 ## NEXT STEPS
-Phase 2 complete and wired. Phase 3 options:
-  A. Live-validate the wired extractor (see "Live validation" above) on a digital + scanned PDF
-  B. Run February 2026 monthly close pipeline
-       Needs: Feb 2026 GL export CSV + Tax Summary CSV (bank statement now available)
-       Then: demo/monthly_close_demo.py --period 2026-02 --skip-hst + JournalEntryAgent
-  C. Re-run monthly close demo with live Gmail send (OAuth now configured)
-       python demo/monthly_close_demo.py
+Year-end worksheet generated; ready for accounting work. Next priorities:
+
+### Immediate accounting tasks (Concetta 2026-04 year-end)
+  1. Open `R:\Concetta Enterprises Inc\Year End\concetta_yearend_2026-04.xlsx`
+  2. Post adjusting entries in the **2. Adjusting Entries** tab
+  3. Review Income Statement and Balance Sheet tabs (formula-driven)
+  4. Populate `_CHEQUE_PAYEES` in `sage50/categorization_rules.py` once cheque
+     payees are confirmed from live OCR (Rogers, Hydro One, City of Toronto, etc.)
+
+### Pipeline options
+  A. Run Feb–Apr 2026 monthly close pipelines (bank statements all processed)
+       demo/monthly_close_demo.py --period 2026-0{2,3,4}
+  B. Live-validate CHQ payee enrichment: run watcher on a statement with cheques,
+       confirm `CHQ#NNNNN - Payee Name` in description and BQ payee field
+  C. Onboard a second client: add row to `R:\bookkeeping\client_accounts.csv`,
+       no code change needed (registry-driven)
   D. Build Sage 50 ODBC integration (Sage50OdbcAgent live test)
-  E. Build SupervisorAgent natural-language dispatch for full close workflow
-  F. Add T2 corporate tax return agent (PrepareT2ReturnAgent)
+  E. Add T2 corporate tax return agent (PrepareT2ReturnAgent)
 
 Pending cleanup:
   ⚠ Duplicate Dec 2025 journal entries in Sage 50 (J329–J348) — not yet addressed
