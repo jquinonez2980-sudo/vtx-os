@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from datetime import date
 from decimal import Decimal
@@ -462,7 +463,260 @@ def _map_ap(r: dict) -> APBill:
 
 
 # ---------------------------------------------------------------------------
-# Unsupported report types (no equivalent DB queries implemented)
+# Trial Balance
+# Computed from all accumulated GL entries through period_end.
+# Sage 50 stores account IDs as 8-digit integers (e.g. 11000000 = account 1100).
+# _lId_to_display() extracts the 4-digit user-visible code by integer division.
+# ---------------------------------------------------------------------------
+
+_NUMERIC_DISPLAY_RE = re.compile(r"^\d{3,6}$")
+
+_REVENUE_FUNCS  = frozenset("RIO")
+_EXPENSE_FUNCS  = frozenset("XY")
+_POSTING_FUNCS  = frozenset("ABCLMEFRIOXY")
+
+
+def _lId_to_display(lid: str) -> str:
+    """Convert 8-digit Sage 50 lId to 4-digit display code: '11000000' → '1100'."""
+    try:
+        n = int(lid)
+        if n >= 10000:
+            return str(n // 10000)
+        return lid
+    except (ValueError, TypeError):
+        return lid
+
+
+def fetch_trial_balance(
+    period_end: date | None = None,
+    *,
+    sai_file: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+):
+    """Compute trial balance as at period_end by aggregating all GL entries.
+
+    Returns list[TBLine] sorted by account code.  Positive net dAmount = debit
+    balance; negative = credit balance (Sage 50 convention).
+
+    If period_end is None, all GL entries are included (full history).
+    """
+    from collections import defaultdict
+    from sage50.trial_balance_parser import TBLine
+
+    sai, usr, pwd = _get_creds(sai_file, user, password)
+
+    coa_rows = _run_bridge(sai, usr, pwd, "coa")
+    coa_map: dict[str, tuple[str, str, str]] = {}
+    for r in coa_rows:
+        lid  = _str(r.get("lId"))
+        func = (_str_or_none(r.get("cFunc")) or "").upper()
+        if not lid or func not in _POSTING_FUNCS:
+            continue
+        display = _lId_to_display(lid)
+        coa_map[lid] = (display, _str(r.get("sName")), func)
+
+    gl_rows = _run_bridge(sai, usr, pwd, "gl", None, period_end)
+
+    net_by_acct: dict[str, Decimal] = defaultdict(Decimal)
+    for r in gl_rows:
+        lid = _str(r.get("lAcctId"))
+        if lid in coa_map:
+            net_by_acct[lid] += _dec(r.get("dAmount"))
+
+    lines = []
+    for lid, net in net_by_acct.items():
+        if net == Decimal("0"):
+            continue
+        display, name, _ = coa_map[lid]
+        if not _NUMERIC_DISPLAY_RE.match(display):
+            continue
+        if net > 0:
+            debit, credit = net, Decimal("0")
+        else:
+            debit, credit = Decimal("0"), abs(net)
+        lines.append(TBLine(account_no=display, description=name, debit=debit, credit=credit))
+
+    lines.sort(key=lambda l: l.account_no)
+    return lines
+
+
+def fetch_trial_balance_csv(
+    period: str,
+    dest_path: "str | Path",
+    *,
+    sai_file: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+) -> int:
+    """Write trial balance CSV for period to dest_path.
+
+    Output format matches Sage 50 export and trial_balance_parser.py:
+        Account Number, Account Description, Debits, Credits
+
+    Returns the number of account lines written.
+    """
+    import calendar as _cal
+    import csv as _csv
+    from pathlib import Path as _Path
+
+    year, month  = int(period[:4]), int(period[5:7])
+    last_day     = _cal.monthrange(year, month)[1]
+    period_end_d = date(year, month, last_day)
+
+    lines = fetch_trial_balance(period_end_d, sai_file=sai_file, user=user, password=password)
+
+    dest = _Path(dest_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "w", newline="", encoding="utf-8-sig") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=[
+            "Account Number", "Account Description", "Debits", "Credits",
+        ])
+        writer.writeheader()
+        for line in lines:
+            writer.writerow({
+                "Account Number":      line.account_no,
+                "Account Description": line.description,
+                "Debits":              str(line.debit)  if line.debit  else "",
+                "Credits":             str(line.credit) if line.credit else "",
+            })
+
+    return len(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tax Summary (derived from GL — period activity on revenue + expense accounts)
+# Output format matches PrepareHSTReturnAgent._read_tax_csv():
+#   Period Start, Period End, Tax Code, Description,
+#   Taxable Sales, Tax Collected, Taxable Purchases, Input Tax Credits, Net Tax
+# ---------------------------------------------------------------------------
+
+def fetch_tax_summary(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    *,
+    tax_code: str = "H",
+    tax_rate: "Decimal | str | None" = None,
+    sai_file: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+) -> dict:
+    """Compute HST/GST summary for the date range from GL + COA.
+
+    Revenue credits (cFunc R/I/O) → taxable_sales.
+    Expense debits  (cFunc X/Y)   → taxable_purchases.
+    tax_rate defaults to 0.13 for Ontario HST (tax_code='H').
+
+    Returns a dict with keys: taxable_sales, tax_collected, taxable_purchases,
+    itc_claimed, net_tax, tax_code.
+    """
+    _TAX_RATES = {"H": Decimal("0.13"), "HST": Decimal("0.13"),
+                  "G": Decimal("0.05"), "GST": Decimal("0.05"),
+                  "Q": Decimal("0.09975"), "QST": Decimal("0.09975")}
+    rate = (
+        Decimal(str(tax_rate))
+        if tax_rate is not None
+        else _TAX_RATES.get(tax_code.upper(), Decimal("0.13"))
+    )
+
+    sai, usr, pwd = _get_creds(sai_file, user, password)
+
+    coa_rows = _run_bridge(sai, usr, pwd, "coa")
+    revenue_ids: set[str] = set()
+    expense_ids: set[str] = set()
+    for r in coa_rows:
+        lid  = _str(r.get("lId"))
+        func = (_str_or_none(r.get("cFunc")) or "").upper()
+        if func in _REVENUE_FUNCS:
+            revenue_ids.add(lid)
+        elif func in _EXPENSE_FUNCS:
+            expense_ids.add(lid)
+
+    gl_rows = _run_bridge(sai, usr, pwd, "gl", start_date, end_date)
+
+    taxable_sales = Decimal("0")
+    taxable_purchases = Decimal("0")
+    for r in gl_rows:
+        lid    = _str(r.get("lAcctId"))
+        amount = _dec(r.get("dAmount"))
+        if lid in revenue_ids and amount < 0:
+            taxable_sales += abs(amount)
+        elif lid in expense_ids and amount > 0:
+            taxable_purchases += amount
+
+    tax_collected = (taxable_sales     * rate).quantize(Decimal("0.01"))
+    itc_claimed   = (taxable_purchases * rate).quantize(Decimal("0.01"))
+    net_tax       = tax_collected - itc_claimed
+
+    return {
+        "taxable_sales":     taxable_sales.quantize(Decimal("0.01")),
+        "tax_collected":     tax_collected,
+        "taxable_purchases": taxable_purchases.quantize(Decimal("0.01")),
+        "itc_claimed":       itc_claimed,
+        "net_tax":           net_tax,
+        "tax_code":          tax_code,
+    }
+
+
+def fetch_tax_summary_csv(
+    period: str,
+    dest_path: "str | Path",
+    *,
+    tax_code: str = "H",
+    tax_rate: "Decimal | str | None" = None,
+    sai_file: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+) -> dict:
+    """Write Tax Summary CSV for period to dest_path.
+
+    Output matches PrepareHSTReturnAgent._read_tax_csv() format.
+    Returns the summary dict (same as fetch_tax_summary()).
+    """
+    import calendar as _cal
+    import csv as _csv
+    from pathlib import Path as _Path
+
+    _TAX_DESC = {"H": "Ontario HST (13%)", "HST": "Ontario HST (13%)",
+                 "G":  "GST (5%)",         "GST":  "GST (5%)"}
+
+    year, month  = int(period[:4]), int(period[5:7])
+    last_day     = _cal.monthrange(year, month)[1]
+    start_d      = date(year, month, 1)
+    end_d        = date(year, month, last_day)
+
+    summary = fetch_tax_summary(
+        start_d, end_d,
+        tax_code=tax_code, tax_rate=tax_rate,
+        sai_file=sai_file, user=user, password=password,
+    )
+
+    dest = _Path(dest_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "w", newline="", encoding="utf-8") as fh:
+        writer = _csv.writer(fh)
+        writer.writerow([
+            "Period Start", "Period End", "Tax Code", "Description",
+            "Taxable Sales", "Tax Collected", "Taxable Purchases",
+            "Input Tax Credits", "Net Tax",
+        ])
+        writer.writerow([
+            start_d.strftime("%m/%d/%Y"),
+            end_d.strftime("%m/%d/%Y"),
+            summary["tax_code"],
+            _TAX_DESC.get(summary["tax_code"].upper(), f"HST ({summary['tax_code']})"),
+            str(summary["taxable_sales"]),
+            str(summary["tax_collected"]),
+            str(summary["taxable_purchases"]),
+            str(summary["itc_claimed"]),
+            str(summary["net_tax"]),
+        ])
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Unsupported report types
 # ---------------------------------------------------------------------------
 
 def fetch_inventory(**_: Any) -> list:
@@ -470,9 +724,6 @@ def fetch_inventory(**_: Any) -> list:
 
 def fetch_payroll(**_: Any) -> list:
     raise NotImplementedError("payroll: not available via Sage50Bridge (no direct DB table mapping)")
-
-def fetch_tax_summary(**_: Any) -> list:
-    raise NotImplementedError("tax_summary: not available via Sage50Bridge (no direct DB table mapping)")
 
 def fetch_bank_reconciliation(**_: Any) -> list:
     raise NotImplementedError("bank_reconciliation: not available via Sage50Bridge (no direct DB table mapping)")
