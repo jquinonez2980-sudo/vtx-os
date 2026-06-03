@@ -19,44 +19,99 @@ human-supervised approval workflows.
 
 ---
 
+## Commands
+
+PowerShell on Windows. Activate the venv first; all commands assume it is active and
+run from the project root.
+
+```powershell
+.\.venv\Scripts\Activate.ps1          # activate venv (do this once per shell)
+```
+
+**Tests** — there is no pytest harness. Each test is a standalone script that prints
+`N/N checks: N passed, N failed` and `exit(1)` on any failure. Run one directly:
+
+```powershell
+python tests\statement_extractor_smoke.py   # run a single test
+python tests\p1_7_e2e.py                     # offline E2E (mock BQ, no GCP)
+```
+
+Run all offline smoke tests:
+
+```powershell
+Get-ChildItem tests\*smoke*.py, tests\p1_7_e2e.py | ForEach-Object { python $_.FullName }
+```
+
+Offline tests (`*_smoke.py`, `p1_7_e2e.py`) mock BQ/Vertex/Gmail and need no auth.
+Live tests (`*_live*.py`, `concetta_live_pipeline.py`, `p2_7_live.py`) require ADC and
+write to production BQ — run deliberately.
+
+**Live pipelines / CLI entry points:**
+
+```powershell
+python scripts\gmail_watcher.py --once --dry-run        # poll inbox, route + extract, no writes
+python scripts\gmail_watcher.py --client concetta --period 2026-02   # pin a client/period
+python demo\monthly_close_demo.py --period 2026-02      # 6-agent close (needs ADC + test CSVs)
+python scripts\year_end.py --client concetta --period 2026-04 --tb-csv "<path>"  # year-end worksheet
+python scripts\gmail_auth.py                            # one-time interactive Gmail OAuth
+```
+
+**GCP / secrets:**
+
+```powershell
+gcloud auth application-default login                   # configure ADC
+echo "value" | gcloud secrets versions add <secret-name> --data-file=-
+```
+
+There is no build, lint, or formatter configured. The Sage 50 ODBC bridge is a separate
+C# component — see `sage50_bridge/build.ps1`.
+
+---
+
 ## Current Phase (always verify in PROJECT_STATUS.md)
 
-Phase 2 — Multi-Agent ADK Architecture  
+Phase 2 — Multi-Agent ADK Architecture (P2.1–P2.7 all ✅ COMPLETE)  
 P2.1 ✅ Orchestrator + Supervisor agent + ADK runtime  
-P2.2 ⏳ A2A protocol wiring ← **next**  
-P2.3 ⏳ Gmail Comms agent  
-P2.4 ⏳ Eventarc trigger (GCS object finalize → orchestrator)  
-P2.5 ⏳ RAG agent  
-P2.6 ⏳ Engagement letter + monthly close demo  
-P2.7 ⏳ Full monthly close — one real client  
+P2.2 ✅ A2A protocol wiring (`agents/a2a.py`; orchestrator routes via A2ATransport)  
+P2.3 ✅ Gmail Comms agent  
+P2.4 ✅ Eventarc trigger (GCS object.finalize → orchestrator)  
+P2.5 ✅ RAG agent (Vertex embeddings + BQ VECTOR_SEARCH)  
+P2.6 ✅ Engagement letter + monthly close demo  
+P2.7 ✅ Full monthly close — one real client (Concetta, live BQ)  
 
-Early accounting-agent code exists (GL recon, ODBC loader, HST stubs) but is **not yet
-integrated into the ADK runtime** — treat as library code until P2.1–P2.2 are done.
+The ADK runtime is in place: all agents are registered in `OrchestratorAgent` and
+communicate via the A2A protocol. Post-Phase-2 work (sessions 11–16) is operational
+bookkeeping — multi-client routing, cheque-payee extraction, Sage 50 bridge, year-end
+worksheets. **Always confirm the true current state in PROJECT_STATUS.md** (it leads this
+file) — recent sessions move fast.
 
 ---
 
 ## Architecture
 
 ```
-[Phase 2 target — ADK runtime]
-SupervisorAgent (ADK)
-    └── OrchestratorAgent (ADK)
+[ADK runtime — live]
+SupervisorAgent (ADK LlmAgent)
+    └── OrchestratorAgent (ADK)        ← dispatches to all sub-agents over A2A
             ├── BookkeepingAgent      [BOOKKEEPING_RUN]
             ├── Sage50IngestAgent     [INGEST_SAGE50_CSV]
             ├── Sage50OdbcAgent       [INGEST_SAGE50_ODBC]
-            ├── ReconcileGLAgent      [RECONCILE_GL]       ← built early
-            ├── PrepareHSTReturnAgent [PREPARE_HST_RETURN] ← stub exists
-            ├── GmailCommsAgent       [SEND_CLIENT_EMAIL]  ← P2.3
-            └── (RAG agent, T2 agent, etc.)
+            ├── ReconcileGLAgent      [RECONCILE_GL]
+            ├── PrepareHSTReturnAgent [PREPARE_HST_RETURN]
+            ├── GmailCommsAgent       [SEND_CLIENT_EMAIL]
+            ├── RagAgent              [INDEX_DOCUMENT | RAG_QUERY]
+            └── JournalEntryAgent     (posts to Sage 50 via bridge)
 
-Inter-agent communication: A2A protocol (P2.2)
-Trigger: Eventarc GCS object.finalize → orchestrator (P2.4)
+Inter-agent communication: A2A protocol (agents/a2a.py, in-process transport)
+Trigger: Eventarc GCS object.finalize → functions/gcs_ingest_trigger → orchestrator
 
-Data flow (current — pre-ADK):
-  PDF/CSV → sage50/pdf_extractor → sage50/bank_parser
-         → sage50/categorizer → BQ (raw + categorized)
-         → core/approval_queue → core/chat_notifier
-         → vtx_audit.audit_log (every step)
+Live bank-statement data flow (scripts/gmail_watcher.py):
+  Gmail inbox → statement_extractor (PyMuPDF→pdfplumber→DocAI cascade)
+             → bank_statement_ocr_parser → client_registry.resolve (route by account #)
+             → cheque_extractor (enrich CHQ payees) → BookkeepingAgent
+             → categorizer / per-client rules → BQ (raw + categorized)
+             → core/approval_queue → core/chat_notifier (or Gmail)
+             → vtx_audit.audit_log (every step)
 ```
 
 **Core patterns:**
@@ -71,50 +126,75 @@ Data flow (current — pre-ADK):
 ## Directory Map
 
 ```
-agents/
-  base.py               AgentBase, TaskType (12 types), TaskRequest, TaskResult
-  orchestrator.py       OrchestratorAgent — dispatcher, registry, 7-event audit trail
-  supervisor.py         SupervisorAgent (ADK LlmAgent) — natural language → dispatch_task tool
+agents/                  (all registered in OrchestratorAgent + A2ATransport)
+  base.py               AgentBase, TaskType, TaskRequest, TaskResult
+  orchestrator.py       OrchestratorAgent — dispatcher, registry, 7-event audit; routes via A2A
+  supervisor.py         SupervisorAgent (ADK LlmAgent, gemini-2.5-flash) — NL → dispatch_task tool
   adk_runner.py         ADK Runner + InMemorySessionService; run_sync() entry point
-  bookkeeping.py        BookkeepingAgent  — parse → categorize → BQ → queue → Chat
-  sage50_ingest.py      Sage50IngestAgent — CSV export → GCS upload
-  sage50_odbc.py        Sage50OdbcAgent   — ODBC → BQ for all 10 Sage 50 report types
-  reconcile_gl.py       ReconcileGLAgent  — GL recon (built early; not yet in ADK graph)
-  prepare_hst_return.py PrepareHSTReturnAgent — HST return (stub, not registered, untested)
+  a2a.py                A2A protocol types + A2AAgentServer + in-process A2ATransport (HTTP-ready)
+  bookkeeping.py        BookkeepingAgent  [BOOKKEEPING_RUN]  parse → categorize → BQ → queue → Chat
+  sage50_ingest.py      Sage50IngestAgent [INGEST_SAGE50_CSV] CSV/GCS → GCS upload + row count
+  sage50_odbc.py        Sage50OdbcAgent   [INGEST_SAGE50_ODBC] ODBC → BQ for all 10 report types
+  reconcile_gl.py       ReconcileGLAgent  [RECONCILE_GL] greedy best-first amount/date/ref matching
+  prepare_hst_return.py PrepareHSTReturnAgent [PREPARE_HST_RETURN] GST34 lines from Tax Summary CSV
+  gmail_comms.py        GmailCommsAgent   [SEND_CLIENT_EMAIL] OAuth creds from Secret Manager
+  rag.py                RagAgent [INDEX_DOCUMENT + RAG_QUERY] Vertex embeddings + BQ VECTOR_SEARCH
+  journal_entry.py      JournalEntryAgent — posts to Sage 50 via bridge; entry-level idempotency
 
 core/
-  audit.py         BQ streaming writer; stderr fallback; never silent
-  bq_loader.py     schema_from_model(), ensure_table(), load_rows()
-  secrets.py       Secret Manager client + thread-safe in-process cache
-  approval_queue.py BQ-backed queue: submit/approve/reject/escalate via DML
-  chat_notifier.py Google Chat incoming webhook, Cards v2, graceful degradation
+  audit.py            BQ streaming writer; stderr fallback; never silent
+  bq_loader.py        schema_from_model(), ensure_table(), ensure_dataset(), load_rows()
+  secrets.py          Secret Manager client + thread-safe in-process cache
+  approval_queue.py   BQ-backed queue: submit/approve/reject/escalate via DML
+  chat_notifier.py    Google Chat webhook, Cards v2; send_alert(); graceful degradation
+  gmail_notifier.py   Gmail label/read helpers; apply_label() quarantines without clearing UNREAD
+  client_registry.py  Multi-client routing — R:\bookkeeping\client_accounts.csv → ClientConfig
+  docai_ocr.py        Document AI OCR; bounding-box row reconstruction; per-page text helpers
+  year_end_worksheet.py  openpyxl populates year-end worksheet template (formulas untouched)
 
 models/
-  base.py          Severity, EventType (20), EventStatus, AgentEvent, AuditRecord
-  banking.py       BankCode, BankTransaction, CategorizedTransaction, CategorizationRule
+  base.py          Severity, EventType, EventStatus, AgentEvent, AuditRecord
+  banking.py       BankCode, BankTransaction (+payee), CategorizedTransaction, CategorizationRule
   sage50.py        10 Sage 50 row types; all use Decimal amounts + date parsing
   approval.py      ApprovalItem, ApprovalStatus
+  reconciliation.py GLEntry, ReconciliationItem, ReconciliationSummary
+  hst_return.py    HSTReturnLine, HSTReturnSummary
+  rag.py           DocumentChunk (list[float] embedding), DocumentType, RagChunkResult
 
 sage50/
   statement_extractor.py  CANONICAL PDF→BankTransaction extractor. Three-tier cascade
                           (PyMuPDF → pdfplumber → Document AI), parse-aware confidence
-                          routing. Use this for all new PDF ingestion.
-  bank_statement_ocr_parser.py  Bank-agnostic OCR text → _Txn parser (all 7 banks)
-  pdf_extractor.py LEGACY — TD-only OCR PDF → TD-format CSV with balance-chain correction.
-                   Superseded by statement_extractor.py; kept for its TD balance-chain logic.
+                          routing. extract() returns ExtractionResult. Use for all new PDF ingestion.
+  bank_statement_ocr_parser.py  Bank-agnostic OCR text → _Txn parser (all 7 banks);
+                                extract_account_no() for routing; wrapped-date recovery
+  cheque_extractor.py  Parses embedded TD cheque-image pages → {cheque_no: ChequeInfo(payee,...)}
+  pdf_extractor.py LEGACY — TD-only OCR PDF → CSV with balance-chain correction. Superseded by
+                   statement_extractor.py; kept for its TD balance-chain logic.
   bank_parser.py   Auto-detects 7 Canadian bank CSV formats; sha256 dedup
-  categorizer.py   29 regex rules, Canadian context; confidence scoring
+  categorizer.py   29 default regex rules (DEFAULT_RULES), Canadian context; confidence scoring
+  categorization_rules.py  Per-client rulesets (ConcettaRuleset); client_id payload selects it
+  gl_parser.py     Sage 50 GL CSV parser (MM/DD/YYYY, bank-account filter) for recon
+  trial_balance_parser.py  Sage 50 trial-balance CSV → TBLine; handles header variants
   csv_uploader.py  GCS upload with ReportType enum + lifecycle folder structure
+  csv_watcher.py   Watches a local folder for Sage 50 CSV drops
   odbc_reader.py   Sage 50 ODBC queries; column constants; Pydantic conversion
+  bridge_reader.py Reads Sage 50 .SAI via the C# Sage50Bridge.exe (see [[project_sage50_bridge_read_limitation]])
 
-tests/
-  p1_7_e2e.py              Offline E2E, mock BQ, 62/62 checks (Northview Dec 2025)
-  concetta_live_pipeline.py Live GCP E2E, 6/6 checks (Concetta Dec 2025)
+scripts/             Operational CLIs + GCP setup (idempotent). Key: gmail_watcher.py (live
+                     inbox → route → extract → book), year_end.py, gmail_auth.py, purge_from_csv.py
+functions/           Cloud Functions Gen 2 — gcs_ingest_trigger.py (Eventarc object.finalize → route)
+main.py              Cloud Functions entry point (1-line import of functions/gcs_ingest_trigger)
+demo/                monthly_close_demo.py — 6-agent close pipeline via A2A, shared session_id
+sage50_bridge/       C# component — Sage50Bridge.exe wraps the Sage 50 SDK (build.ps1)
+docs/                BOOKKEEPER_GUIDE.md — manual bookkeeping runbook (startup → new client)
 
-data/test-client/          Gitignored — real client PDFs, CSVs, BQ previews
-config/                    Templates only; never commit actual .env or *.json
-scripts/                   GCP setup scripts (idempotent)
-PROJECT_STATUS.md          Single source of truth for current phase + decisions
+tests/               Standalone scripts (no pytest); each prints N/N checks, exit(1) on fail.
+  *_smoke.py / p1_7_e2e.py   Offline (mock BQ/Vertex/Gmail) — no auth needed
+  *_live*.py / concetta_live_pipeline.py / p2_7_live.py   Live GCP — require ADC, write prod BQ
+
+data/test-client/    Gitignored — real client PDFs, CSVs, BQ previews
+config/              Templates only (project.env.template); never commit actual .env or *.json
+PROJECT_STATUS.md    Single source of truth for current phase + decisions (read FIRST)
 ```
 
 ---
@@ -145,7 +225,7 @@ as positive numbers in the "Withdrawals ($)" column. Without `abs()`, a CSV that
 accidentally has negative withdrawals would flip signs and produce phantom deposits.
 This bug was discovered during P1.7 — always use `abs()` when reading debit/outflow columns.
 
-### Bank CSV Column Formula (all 6 bank parsers)
+### Bank CSV Column Formula (all 7 bank parsers + generic)
 
 ```python
 amount = credit_column - abs(debit_column)

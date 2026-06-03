@@ -195,7 +195,7 @@ Results: 20 txns parsed (SERVICE CHARGE OCR unrecoverable — acceptable)
 Fixes applied:
   - sage50/pdf_extractor.py: \b? on zero-width assertion removed (Python 3.12+)
   - sage50/pdf_extractor.py: date format changed to %Y-%m-%d (was DD/MM/YYYY)
-  - sage50/bank_parser.py:   abs() applied to withdrawal/debit columns (all 6 parsers)
+  - sage50/bank_parser.py:   abs() applied to withdrawal/debit columns (all 7 parsers + generic)
 Key OCR recoveries:
   - SENTRIX FINANCI INV: 23,249.07 credit — balance-chain corrected (OCR: "23., 249. 07")
   - PC MASTRCRD Z7W8Y6:  1,008.59 — balance-chain residual (OCR amount was garbled)
