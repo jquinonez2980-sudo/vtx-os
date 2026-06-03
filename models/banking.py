@@ -39,6 +39,7 @@ class BankTransaction(BaseModel):
     amount:          Decimal       # positive = deposit/credit, negative = withdrawal/debit
     balance:         Decimal | None = None
     reference:       str | None = None   # cheque number or bank reference
+    payee:           str | None = None   # populated from cheque image OCR
 
 
 class CategorizationRule(BaseModel):

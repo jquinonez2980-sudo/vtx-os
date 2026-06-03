@@ -143,6 +143,21 @@ def _upload_to_gcs(csv_path: Path, period: str) -> str:
     return f"gs://{GCS_BUCKET}/{blob_name}"
 
 
+def _archive_pdf_to_gcs(pdf_path: Path, period: str, client_id: str) -> str:
+    """Archive original PDF to GCS so cheque images are preserved for re-processing."""
+    from google.cloud import storage as gcs
+    now       = datetime.now(timezone.utc)
+    blob_name = f"bank-statements/pdf/{now.strftime('%Y/%m/%d')}/{client_id}/{pdf_path.name}"
+    client    = gcs.Client(project=GCP_PROJECT)
+    blob      = client.bucket(GCS_BUCKET).blob(blob_name)
+    blob.metadata = {
+        "period": period, "client_id": client_id,
+        "source": "gmail_watcher", "timestamp": now.isoformat(),
+    }
+    blob.upload_from_filename(str(pdf_path), content_type="application/pdf")
+    return f"gs://{GCS_BUCKET}/{blob_name}"
+
+
 # ---------------------------------------------------------------------------
 # R:\ drop folder
 # ---------------------------------------------------------------------------
@@ -271,13 +286,20 @@ def _process_pdf(
         print(f"    R:\\    : {r_dest}")
         result["r_dest"] = str(r_dest)
 
-    # Step 4 — GCS upload
+    # Step 4 — GCS upload (CSV + original PDF archive)
     try:
         gcs_uri = _upload_to_gcs(csv_path, period)
         print(f"    GCS    : {gcs_uri}")
         result["gcs_uri"] = gcs_uri
     except Exception as exc:
-        print(f"    [warn] GCS upload failed: {exc}")
+        print(f"    [warn] GCS CSV upload failed: {exc}")
+
+    try:
+        pdf_gcs_uri = _archive_pdf_to_gcs(pdf_path, period, cfg.client_id)
+        print(f"    PDF GCS: {pdf_gcs_uri}")
+        result["pdf_gcs_uri"] = pdf_gcs_uri
+    except Exception as exc:
+        print(f"    [warn] PDF archive to GCS failed: {exc}")
 
     # Step 5 — BookkeepingAgent
     print(f"    Agent  : BookkeepingAgent...", end=" ", flush=True)

@@ -8,6 +8,12 @@ Expected Impact: ~85% auto-categorization, 5–10% manual review queue
 from decimal import Decimal
 from typing import Tuple, Optional
 
+# Known cheque payees populated after live runs confirm payee names.
+# Format: (UPPERCASE_KEYWORD_IN_DESCRIPTION, gl_no, account_name)
+# Example: ("ROGERS COMMUNICATIONS", 5600, "Telephone & Cellular")
+# Leave empty — entries are added as payees are confirmed from cheque OCR.
+_CHEQUE_PAYEES: list[tuple[str, int, str]] = []
+
 
 # Maps our internal 4-digit GL codes to Concetta's actual Sage 50 8-digit lId values.
 # Applied only at bridge post time; categorization and BQ use the 4-digit codes.
@@ -49,6 +55,7 @@ class ConcettaRuleset:
         """Initialize the ruleset with all categorization rules."""
         self.rules = [
             self._rule_revenue,
+            self._rule_cheque_payee,   # payee names extracted from cheque images
             self._rule_insurance,
             self._rule_bank_fees,
             self._rule_telecom,
@@ -88,7 +95,19 @@ class ConcettaRuleset:
             return (4100, "Revenue", Decimal("95"))
         return None
 
-    # ========== RULE 1: Insurance ==========
+    # ========== RULE 1: Cheque payees (populated after first live run) ==========
+    def _rule_cheque_payee(self, desc: str, amount: Decimal) -> Optional[Tuple[int, str, Decimal]]:
+        """Match CHQ transactions where payee was extracted from cheque image.
+
+        desc format after enrichment: "CHQ#00788 - Rogers Communications Inc."
+        Add entries to _CHEQUE_PAYEES as payees are confirmed from live runs.
+        """
+        for keyword, gl_no, gl_name in _CHEQUE_PAYEES:
+            if keyword in desc:
+                return (gl_no, gl_name, Decimal("85"))
+        return None
+
+    # ========== RULE 2: Insurance ==========
     def _rule_insurance(self, desc: str, amount: Decimal) -> Optional[Tuple[int, str, Decimal]]:
         """ECONOMICAL INS → 5400 Insurance, 95% confidence"""
         if "ECONOMICAL INS" in desc:

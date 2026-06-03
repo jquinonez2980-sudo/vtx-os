@@ -38,18 +38,21 @@ _SYNC_TIMEOUT    = 300.0              # seconds
 _BATCH_TIMEOUT   = 900               # seconds — LRO wait ceiling
 
 
-def _reconstruct_row_ordered_text(doc: dict) -> str:
-    """Reconstruct row-ordered text from Document AI batch JSON.
+def _page_texts_from_doc(doc: dict) -> list[str]:
+    """Row-ordered text for each page from Document AI output, returned as a list.
 
     Document AI sometimes reads multi-column tables column-by-column rather
     than row-by-row, producing description text separated from
     amounts/dates/balances.  Using bounding-box Y-coordinates to re-sort
     visual lines into proper rows gives DESCRIPTION  AMOUNT  DATE  BALANCE
     on a single line — the format bank_statement_ocr_parser expects.
+
+    Returns one reconstructed string per page (empty list when doc has no text).
+    Use _reconstruct_row_ordered_text() when a single joined string is needed.
     """
     full_text = doc.get("text", "")
     if not full_text:
-        return ""
+        return []
 
     page_texts: list[str] = []
     for page in doc.get("pages", []):
@@ -107,7 +110,14 @@ def _reconstruct_row_ordered_text(doc: dict) -> str:
         )
         page_texts.append(page_line)
 
-    return "\n".join(page_texts) if page_texts else full_text
+    return page_texts
+
+
+def _reconstruct_row_ordered_text(doc: dict) -> str:
+    """Backward-compatible wrapper: join _page_texts_from_doc into a single string."""
+    full_text = doc.get("text", "")
+    pages = _page_texts_from_doc(doc)
+    return "\n".join(pages) if pages else full_text
 
 
 class DocAIOCR:
@@ -123,19 +133,28 @@ class DocAIOCR:
 
     def ocr_pdf_bytes(self, pdf_bytes: bytes) -> str:
         """OCR raw PDF bytes. Routes to sync or batch based on size."""
-        if len(pdf_bytes) >= _SYNC_LIMIT:
-            return self._ocr_batch(pdf_bytes)
-        return self._ocr_sync(pdf_bytes)
+        text, _ = self.ocr_pdf_bytes_with_pages(pdf_bytes)
+        return text
 
     def ocr_pdf_file(self, path: str | Path) -> str:
         """Read a PDF from disk and OCR it."""
         return self.ocr_pdf_bytes(Path(path).read_bytes())
 
+    def ocr_pdf_bytes_with_pages(self, pdf_bytes: bytes) -> tuple[str, list[str]]:
+        """OCR raw PDF bytes; returns (joined_text, per_page_texts)."""
+        if len(pdf_bytes) >= _SYNC_LIMIT:
+            return self._ocr_batch(pdf_bytes)
+        return self._ocr_sync(pdf_bytes)
+
+    def ocr_pdf_file_with_pages(self, path: str | Path) -> tuple[str, list[str]]:
+        """Read a PDF from disk and OCR it; returns (joined_text, per_page_texts)."""
+        return self.ocr_pdf_bytes_with_pages(Path(path).read_bytes())
+
     # ------------------------------------------------------------------
     # Sync path (< 5 MB)
     # ------------------------------------------------------------------
 
-    def _ocr_sync(self, pdf_bytes: bytes) -> str:
+    def _ocr_sync(self, pdf_bytes: bytes) -> tuple[str, list[str]]:
         import json
         from google.cloud import documentai
         request = documentai.ProcessRequest(
@@ -154,22 +173,22 @@ class DocAIOCR:
         # Without it, multi-column statements (e.g. TD Bank) come back read
         # column-by-column — descriptions split from their amounts/dates — and
         # bank_statement_ocr_parser parses 0 transactions. to_json() emits the
-        # camelCase field names _reconstruct_row_ordered_text expects.
+        # camelCase field names _page_texts_from_doc expects.
         try:
             doc_dict = json.loads(documentai.Document.to_json(doc))
-            reconstructed = _reconstruct_row_ordered_text(doc_dict)
-            if reconstructed.strip():
-                return reconstructed
+            page_texts = _page_texts_from_doc(doc_dict)
+            if page_texts:
+                return "\n".join(page_texts), page_texts
         except Exception as exc:
             log.warning("sync row reconstruction failed, using raw text: %s", exc)
 
-        return doc.text
+        return doc.text, [doc.text]
 
     # ------------------------------------------------------------------
     # Batch/async path (≥ 5 MB)
     # ------------------------------------------------------------------
 
-    def _ocr_batch(self, pdf_bytes: bytes) -> str:
+    def _ocr_batch(self, pdf_bytes: bytes) -> tuple[str, list[str]]:
         import json
         import uuid
         from google.cloud import documentai
@@ -225,6 +244,7 @@ class DocAIOCR:
 
             # 4 — Read output shards from GCS (sorted for correct page order)
             texts: list[str] = []
+            all_page_texts: list[str] = []
             output_blobs = sorted(
                 bucket.list_blobs(prefix=output_prefix),
                 key=lambda b: b.name,
@@ -232,11 +252,16 @@ class DocAIOCR:
             for blob in output_blobs:
                 if blob.name.endswith(".json"):
                     doc = json.loads(blob.download_as_text())
-                    text = _reconstruct_row_ordered_text(doc) or doc.get("text") or ""
-                    if text:
-                        texts.append(text)
+                    shard_pages = _page_texts_from_doc(doc)
+                    if shard_pages:
+                        all_page_texts.extend(shard_pages)
+                        texts.append("\n".join(shard_pages))
+                    else:
+                        fallback = doc.get("text") or ""
+                        if fallback:
+                            texts.append(fallback)
 
-            return "\n".join(texts)
+            return "\n".join(texts), all_page_texts
 
         finally:
             # 5 — Best-effort cleanup of temp GCS files
@@ -298,3 +323,8 @@ def ocr_pdf_bytes(pdf_bytes: bytes) -> str:
 def ocr_pdf_file(path: str | Path) -> str:
     """OCR a PDF file using the default DocAIOCR instance."""
     return _instance().ocr_pdf_file(path)
+
+
+def ocr_pdf_file_with_pages(path: str | Path) -> tuple[str, list[str]]:
+    """OCR a PDF file; returns (joined_text, per_page_texts)."""
+    return _instance().ocr_pdf_file_with_pages(path)

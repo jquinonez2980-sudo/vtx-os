@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -83,7 +84,8 @@ class ExtractionResult:
     pages:        int
     elapsed_ms:   int
     bank_code:    BankCode | None = None
-    transactions: list = field(default_factory=list)  # list[bank_statement_ocr_parser._Txn]
+    transactions: list = field(default_factory=list)   # list[bank_statement_ocr_parser._Txn]
+    page_texts:   list = field(default_factory=list)   # list[str], one per PDF page
 
     @property
     def txn_count(self) -> int:
@@ -110,14 +112,14 @@ def _confidence(text: str, page_count: int) -> float:
 # Extraction path implementations
 # ---------------------------------------------------------------------------
 
-def _extract_pymupdf(path: Path) -> tuple[str, float, int]:
+def _extract_pymupdf(path: Path) -> tuple[str, float, int, list[str]]:
     """Extract native text layer with PyMuPDF (fitz).
 
     Uses sort=True (available since PyMuPDF 1.19) to guarantee reading order
     even on PDFs with out-of-order internal text streams.  Falls back
     gracefully if the parameter is not supported.
 
-    Returns (text, confidence, page_count).
+    Returns (text, confidence, page_count, page_texts).
     """
     import fitz  # PyMuPDF
 
@@ -129,23 +131,22 @@ def _extract_pymupdf(path: Path) -> tuple[str, float, int]:
                 t = page.get_text("text", sort=True)
             except TypeError:
                 t = page.get_text("text")
-            if t:
-                pages.append(t)
+            pages.append(t or "")
         n = len(doc)
     finally:
         doc.close()
 
     full = "\n".join(pages)
-    return full, _confidence(full, n), n
+    return full, _confidence(full, n), n, pages
 
 
-def _extract_pdfplumber(path: Path) -> tuple[str, float, int]:
+def _extract_pdfplumber(path: Path) -> tuple[str, float, int, list[str]]:
     """Extract text using pdfplumber.
 
     x_tolerance=3 tightens column separation, which helps avoid run-together
     description + amount tokens in narrow bank statement tables.
 
-    Returns (text, confidence, page_count).
+    Returns (text, confidence, page_count, page_texts).
     """
     import pdfplumber
 
@@ -158,27 +159,68 @@ def _extract_pdfplumber(path: Path) -> tuple[str, float, int]:
             parts.append(t)
 
     full = "\n".join(parts)
-    return full, _confidence(full, n), n
+    return full, _confidence(full, n), n, parts
 
 
-def _extract_docai(path: Path) -> tuple[str, float, int]:
+def _extract_docai(path: Path) -> tuple[str, float, int, list[str]]:
     """Extract text via Google Cloud Document AI OCR.
 
     Routing: <5 MB → synchronous process_document;
              ≥5 MB → async batch_process_documents (GCS round-trip).
 
     Requires vtx-docai-processor-id secret and GCP ADC credentials.
-    Returns (text, confidence, page_count).
+    Returns (text, confidence, page_count, page_texts).
     """
-    from core.docai_ocr import ocr_pdf_file
+    from core.docai_ocr import ocr_pdf_file_with_pages
 
-    text = ocr_pdf_file(path)
+    text, page_texts = ocr_pdf_file_with_pages(path)
     # DocAI output quality is high when non-empty; use 0.95 as the score so
     # callers know this path succeeded and further fallback isn't needed.
     conf = 0.95 if text.strip() else 0.0
     # Approximate page count from form-feed separators; minimum 1.
     pages = max(1, text.count("\f") + 1)
-    return text, conf, pages
+    return text, conf, pages, page_texts
+
+
+# ---------------------------------------------------------------------------
+# Cheque payee enrichment
+# ---------------------------------------------------------------------------
+
+_CHQ_DESC_RE = re.compile(r"^CHQ#(\d+)-")   # matches original CHQ#00788-1141529082
+_CHQ_PAYEE_RE = re.compile(r"^CHQ#\d+\s*-\s*(.+)")  # matches enriched CHQ#00788 - Payee
+
+def _enrich_cheque_payees(txns: list[Any], page_texts: list[str]) -> None:
+    """Enrich CHQ _Txn descriptions with payee name from cheque image pages.
+
+    Modifies _Txn.description in-place:
+        "CHQ#00788-1141529082"  →  "CHQ#00788 - Rogers Communications Inc."
+
+    No-ops when there are no CHQ transactions or no cheque pages in page_texts.
+    """
+    if not page_texts:
+        return
+    chq_txns = [t for t in txns if _CHQ_DESC_RE.match(t.description)]
+    if not chq_txns:
+        return
+
+    from sage50.cheque_extractor import extract_cheque_map
+    cheque_map = extract_cheque_map(page_texts)
+    if not cheque_map:
+        return
+
+    enriched = 0
+    for txn in chq_txns:
+        m = _CHQ_DESC_RE.match(txn.description)
+        if not m:
+            continue
+        chq_no = m.group(1).zfill(5)
+        info = cheque_map.get(chq_no)
+        if info and info.confidence >= 0.3 and info.payee:
+            txn.description = f"CHQ#{m.group(1)} - {info.payee}"
+            enriched += 1
+
+    if enriched:
+        log.info("cheque enrichment: %d/%d CHQ transactions got payee names", enriched, len(chq_txns))
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +243,13 @@ def _txns_to_bank_transactions(
         amount: Decimal = t.credit - abs(t.debit)
         key = f"{bank_code.value}|{account_no}|{t.txn_date}|{t.description}|{amount}|{i}"
         txn_id = hashlib.sha256(key.encode()).hexdigest()[:20]
+
+        # If description was enriched with payee ("CHQ#00788 - Rogers..."), extract it.
+        payee: str | None = None
+        m_payee = _CHQ_PAYEE_RE.match(t.description)
+        if m_payee:
+            payee = m_payee.group(1).strip()
+
         result.append(BankTransaction(
             txn_id=txn_id,
             bank_code=bank_code,
@@ -210,6 +259,7 @@ def _txns_to_bank_transactions(
             raw_description=t.description,
             amount=amount,
             balance=t.balance,
+            payee=payee,
         ))
     return result
 
@@ -376,6 +426,7 @@ class BankStatementExtractor:
             if best is None or result.confidence > best.confidence:
                 best = result
             if result.confidence >= self._threshold and result.txn_count > 0:
+                _enrich_cheque_payees(result.transactions, result.page_texts)
                 return result
             log.debug(
                 "%s: %s conf=%.2f (thr=%.2f) txns=%d — trying next path",
@@ -388,6 +439,7 @@ class BankStatementExtractor:
             "%s: no path cleared threshold with >0 txns (best=%.2f via %s, %d txns)",
             path.name, best.confidence, best.path_used.value, best.txn_count,
         )
+        _enrich_cheque_payees(best.transactions, best.page_texts)
         return best
 
     # ------------------------------------------------------------------
@@ -408,7 +460,7 @@ class BankStatementExtractor:
         """
         t0 = time.perf_counter()
         try:
-            text, confidence, pages = fn(path)
+            text, confidence, pages, page_texts = fn(path)
         except Exception as exc:
             ms = int((time.perf_counter() - t0) * 1000)
             log.warning("%s: %s failed (%s)", path.name, ep.value, exc)
@@ -425,6 +477,7 @@ class BankStatementExtractor:
         return ExtractionResult(
             text=text, path_used=ep, confidence=confidence, pages=pages,
             elapsed_ms=ms, bank_code=bank_code, transactions=txns,
+            page_texts=page_texts,
         )
 
     @staticmethod
