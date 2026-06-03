@@ -77,10 +77,10 @@ def _is_data_row(row: dict | list) -> bool:
 # ---------------------------------------------------------------------------
 
 _HEADER_VARIANTS = {
-    "account_no":  ("Account No.", "Account No", "Account", "Acct"),
+    "account_no":  ("Account No.", "Account No", "Account Number", "Account", "Acct"),
     "description": ("Account Description", "Description", "Account Name", "Name"),
-    "debit":       ("Debit", "Dr", "Debit Amount"),
-    "credit":      ("Credit", "Cr", "Credit Amount"),
+    "debit":       ("Debit", "Debits", "Dr", "Debit Amount"),
+    "credit":      ("Credit", "Credits", "Cr", "Credit Amount"),
 }
 
 
