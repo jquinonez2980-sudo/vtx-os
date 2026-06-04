@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "PYTHONUTF8": "1",
+    "PYTHONIOENCODING": "utf-8"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(.venv/Scripts/python *)",
+      "Bash(.venv\\Scripts\\python.exe *)",
+      "Bash(.venv/Scripts/pip *)",
+      "Bash(.venv\\Scripts\\pip *)",
+      "Bash(python *)",
+      "PowerShell(& \".venv\\Scripts\\python.exe\" *)",
+      "PowerShell(& \".\\.venv\\Scripts\\python.exe\" *)",
+      "PowerShell(& \".venv\\Scripts\\pip.exe\" *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(gcloud *)",
+      "Bash(bq *)",
+      "PowerShell(gcloud *)",
+      "PowerShell(bq *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Select-String *)",
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:google.github.io)",
+      "WebFetch(domain:adk.dev)",
+      "WebFetch(domain:cloud.google.com)"
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 .venv/
+.claude/settings.local.json
 config/project.env
 config/service-account.json
 config/*.json
