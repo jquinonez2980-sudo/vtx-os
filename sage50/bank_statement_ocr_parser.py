@@ -296,6 +296,15 @@ _BAL_FORWARD_RE = re.compile(
     re.I,
 )
 
+# Statement summary/total lines that carry amounts but are NOT transactions
+# (e.g. BMO's "Closing totals  18,756.35  13,622.91"). Skipped during parsing
+# so they are never booked as phantom deposits/withdrawals.
+_SUMMARY_LINE_RE = re.compile(
+    r"closing\s+totals?|opening\s+totals?|closing\s+balance"
+    r"|total\s+(deposits?|withdrawals?|debits?|credits?|amount)",
+    re.I,
+)
+
 
 def _extract_transaction_section(lines: list[str]) -> list[str]:
     """Slice the line list to the transaction table region.
@@ -371,6 +380,10 @@ def _parse_lines(lines: list[str], year: int) -> list[_Txn]:
         if len(line) < 6:
             continue
         if _is_header_line(line):
+            continue
+        if _SUMMARY_LINE_RE.search(line):
+            # Statement total/summary row — seed prev_balance if it carries one,
+            # but never emit it as a transaction.
             continue
 
         txn_date, rest = _try_parse_date(line, year)
@@ -449,6 +462,35 @@ def _parse_lines(lines: list[str], year: int) -> list[_Txn]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _apply_year_rollover(txns: list[_Txn], closing_year: int) -> None:
+    """Correct calendar years on a statement that straddles a year boundary.
+
+    _parse_lines stamps every row with one inferred year (the closing year).
+    When a statement opens in December and closes in January, the December rows
+    belong to the prior year. Transactions are in chronological statement order,
+    so a month that DECREASES versus the previous row marks a year boundary.
+    We count boundaries forward, then set each row's year so the final segment
+    lands on *closing_year* and earlier segments roll back one year per boundary.
+
+    Mutates txns in place. A statement wholly within one year is left untouched.
+    """
+    if not txns:
+        return
+    offsets = [0] * len(txns)
+    off = 0
+    for i in range(1, len(txns)):
+        if txns[i].txn_date.month < txns[i - 1].txn_date.month:
+            off += 1
+        offsets[i] = off
+    if off == 0:
+        return  # single-year statement
+    max_off = off
+    for t, o in zip(txns, offsets):
+        new_year = closing_year - (max_off - o)
+        if new_year != t.txn_date.year:
+            t.txn_date = t.txn_date.replace(year=new_year)
+
+
 def parse_ocr_text(
     text: str,
     bank: BankCode | None = None,
@@ -461,7 +503,9 @@ def parse_ocr_text(
         bank = detect_bank(text)
     year  = _infer_year(text)
     lines = _extract_transaction_section(text.splitlines())
-    return _parse_lines(lines, year)
+    txns  = _parse_lines(lines, year)
+    _apply_year_rollover(txns, year)
+    return txns
 
 
 def write_csv(transactions: list[_Txn], output_path: Path | str) -> int:

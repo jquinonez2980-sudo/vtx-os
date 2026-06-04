@@ -76,17 +76,27 @@ _MONTH_ABBR = {
 }
 
 
+_MONTH_NAMES = (
+    r"january|february|march|april|may|june|july|august|september"
+    r"|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec"
+)
+
+
 def _period_from_filename(name: str) -> str | None:
-    """Try to extract YYYY-MM from a filename like 'dec-2025-bank.pdf'."""
+    """Try to extract YYYY-MM from a filename or subject.
+
+    Handles 'dec-2025-bank.pdf', 'February 2026', and the 'ending <Month> <DD>
+    <YYYY>' form used in these subjects (e.g. 'ending February 07 2025').
+    """
     m = re.search(r"(\d{4})[-_](\d{2})", name)
     if m and 1 <= int(m.group(2)) <= 12:
         return f"{m.group(1)}-{m.group(2)}"
-    m = re.search(
-        r"(january|february|march|april|may|june|july|august|september"
-        r"|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)"
-        r"[-_ ]?(\d{4})",
-        name, re.I,
-    )
+    # "Month DD YYYY" / "Month DD, YYYY" — a day sits between month and year.
+    m = re.search(rf"({_MONTH_NAMES})\s+\d{{1,2}},?\s+(\d{{4}})", name, re.I)
+    if m:
+        return f"{m.group(2)}-{_MONTH_ABBR[m.group(1).lower()]}"
+    # "Month YYYY" (no day)
+    m = re.search(rf"({_MONTH_NAMES})[-_ ]?(\d{{4}})", name, re.I)
     if m:
         return f"{m.group(2)}-{_MONTH_ABBR[m.group(1).lower()]}"
     return None
