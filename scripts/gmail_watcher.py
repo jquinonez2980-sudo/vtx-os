@@ -249,6 +249,14 @@ def _process_pdf(
     )
     print(f"    Period : {period}")
 
+    # Re-anchor transaction years to the (authoritative) period year. Guards
+    # against _infer_year defaulting to the current year on a header with no
+    # 4-digit year, which would silently mis-date the whole statement.
+    from sage50.bank_statement_ocr_parser import anchor_year_to_period
+    shift = anchor_year_to_period(ext.transactions, int(period[:4]))
+    if shift:
+        print(f"    [year] re-anchored to {period[:4]} (shift {shift:+d}y)")
+
     # Step 1b — Resolve which client this statement belongs to (route by any
     # registered account number printed on the statement; bank-agnostic). Never
     # book until resolved.

@@ -491,6 +491,28 @@ def _apply_year_rollover(txns: list[_Txn], closing_year: int) -> None:
             t.txn_date = t.txn_date.replace(year=new_year)
 
 
+def anchor_year_to_period(txns: list[_Txn], period_year: int) -> int:
+    """Shift all transaction years so the latest dated row falls in *period_year*.
+
+    _infer_year guesses the year from the OCR header and falls back to the current
+    year when none is found — which silently mis-dates a whole statement (observed
+    on a scanned statement whose header carried no 4-digit year). The statement's
+    closing period is authoritative, so once the caller knows it (from the subject
+    or filename) it can re-anchor: offset = period_year - max(txn year), applied to
+    every row. Month/day are preserved, and any intra-statement rollover (Dec->Jan)
+    set by _apply_year_rollover is kept intact since the shift is constant.
+
+    Returns the applied offset in years (0 when already aligned). Mutates in place.
+    """
+    if not txns:
+        return 0
+    offset = period_year - max(t.txn_date.year for t in txns)
+    if offset:
+        for t in txns:
+            t.txn_date = t.txn_date.replace(year=t.txn_date.year + offset)
+    return offset
+
+
 def parse_ocr_text(
     text: str,
     bank: BankCode | None = None,
