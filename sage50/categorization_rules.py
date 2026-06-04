@@ -191,9 +191,201 @@ class ConcettaRuleset:
 def categorize_concetta(description: str, amount: Decimal) -> Tuple[int, str, Decimal]:
     """
     Quick function to categorize a single transaction using Concetta's ruleset.
-    
+
     Usage:
         account_num, account_name, confidence = categorize_concetta("ECONOMICAL INS", Decimal("-182.41"))
     """
     ruleset = ConcettaRuleset()
     return ruleset.categorize(description, amount)
+
+
+# ===========================================================================
+# Canadian Federation of theotherapy — church / non-profit
+# Derived from the FY2024 General Ledger (Sage 50 bridge read, 1,152 lines).
+# GL codes are the client's real Sage 50 display codes.  Suspense = 5800.
+# ===========================================================================
+
+class TheotherapyRuleset:
+    """Client-specific categorization for Canadian Federation of theotherapy.
+
+    Rules apply in priority order; first match wins.  Fee/specific rules run
+    before generic ones (e.g. "E-TRANSFER FEE" must beat the tithes rule that
+    keys on "E-TRANSFER").  Account codes and the description keywords are taken
+    from how the prior bookkeeper coded FY2024.
+    """
+
+    SUSPENSE_GL = 5800
+
+    def __init__(self):
+        self.rules = [
+            self._rule_bank_fees,        # 5690
+            self._rule_credit_card,      # 5645
+            self._rule_gas,              # 5730
+            self._rule_telecom,          # 5780
+            self._rule_internet,         # 5775
+            self._rule_insurance_auto,   # 5688  (before generic insurance)
+            self._rule_insurance,        # 5685
+            self._rule_utilities,        # 5790
+            self._rule_rent_julian,      # 5761  (before generic rent)
+            self._rule_rent,             # 5760
+            self._rule_office,           # 5700
+            self._rule_seminar,          # 5630
+            self._rule_donation,         # 5680
+            self._rule_paypal,           # 5240
+            self._rule_payroll_remit,    # 2130  (CANACT)
+            self._rule_payroll_people,   # 2160  (recurring named payees)
+            self._rule_tithes,           # 4020  (deposits only)
+            self._rule_suspense_fallback,# 5800
+        ]
+
+    def categorize(self, description: str, amount: Decimal) -> Tuple[int, str, Decimal]:
+        desc = description.upper()
+        for rule in self.rules:
+            result = rule(desc, amount)
+            if result is not None:
+                return result
+        return (self.SUSPENSE_GL, "Suspense", Decimal("0"))
+
+    # -- 5690 Interest & Bank Charges -------------------------------------
+    def _rule_bank_fees(self, desc, amount):
+        for kw in ("E-TRANSFER FEE", "E-TRASNFER FEE", "WIRE PAYMENT FEE",
+                   "TRANSFER FEE", "PURCHASE FEE", "OVERDRAFT", "BANK CHARGE",
+                   "SERVICE CHARGE", "MONTHLY PLAN FEE", "MONTHLY FEE",
+                   "MAINTENANCE FEE", "HANDLING CHG"):
+            if kw in desc:
+                return (5690, "Interest & Bank Charges", Decimal("95"))
+        return None
+
+    # -- 5645 Credit Card Charges -----------------------------------------
+    def _rule_credit_card(self, desc, amount):
+        for kw in ("BMO MC", "MC CIBC", "M/C-CIBC", "M/C", "MASTERCARD", "CIBC MC"):
+            if kw in desc:
+                return (5645, "Credit Card Charges", Decimal("90"))
+        return None
+
+    # -- 5730 Motor Vehicle Expenses (fuel) -------------------------------
+    def _rule_gas(self, desc, amount):
+        for kw in ("PIONEER", "COSTCO GAS", "COTSCO GAS", "CANADIAN TIRE GAS",
+                   "ESSO", "PETRO", "COLBORNE GAS", "ECHO PLACE CARW", "CARWASH"):
+            if kw in desc:
+                return (5730, "Motor Vehicle Expenses", Decimal("95"))
+        return None
+
+    # -- 5780 Telephone ---------------------------------------------------
+    def _rule_telecom(self, desc, amount):
+        for kw in ("VIRGIN PLUS", "KOODO", "FREEDOM MOBILE", "ROGERS",
+                   "BRANTFORD MOBILE"):
+            if kw in desc:
+                return (5780, "Telephone", Decimal("95"))
+        return None
+
+    # -- 5775 Internet Service --------------------------------------------
+    def _rule_internet(self, desc, amount):
+        if "BELL" in desc:
+            return (5775, "Internet Service", Decimal("90"))
+        return None
+
+    # -- 5688 Insurance - Auto --------------------------------------------
+    def _rule_insurance_auto(self, desc, amount):
+        if "BENEVA" in desc:
+            return (5688, "Insurance - Auto", Decimal("90"))
+        return None
+
+    # -- 5685 Insurance ---------------------------------------------------
+    def _rule_insurance(self, desc, amount):
+        for kw in ("DAG INS", "CERTAS", "NORTHBRIDGE", "DESJ.SEC.FIN", "DESJ",
+                   " INS"):
+            if kw in desc:
+                return (5685, "Insurance", Decimal("90"))
+        return None
+
+    # -- 5790 Utilities ---------------------------------------------------
+    def _rule_utilities(self, desc, amount):
+        for kw in ("GRANDBRIDGE", "GRAND ENERGY", "HYDRO QUEBEC", "HYDRO",
+                   "CLEAN CUT", "ENBRIDGE", "ENERGY", "ENRG"):
+            if kw in desc:
+                return (5790, "Utilities", Decimal("95"))
+        return None
+
+    # -- 5761 Rent - Julian (before generic rent) -------------------------
+    def _rule_rent_julian(self, desc, amount):
+        if "JULIAN ANTHONY" in desc or "RENT - JULIAN" in desc:
+            return (5761, "Rent - Julian", Decimal("90"))
+        return None
+
+    # -- 5760 Rent --------------------------------------------------------
+    def _rule_rent(self, desc, amount):
+        if "RENT" in desc:
+            return (5760, "Rent", Decimal("90"))
+        return None
+
+    # -- 5700 Office Supplies ---------------------------------------------
+    def _rule_office(self, desc, amount):
+        for kw in ("STAPLES", "REXALL", "DOLLARAMA", "DOLLORAMA"):
+            if kw in desc:
+                return (5700, "Office Supplies", Decimal("85"))
+        return None
+
+    # -- 5630 Seminar & Conferences ---------------------------------------
+    def _rule_seminar(self, desc, amount):
+        for kw in ("MEETING", "SEMINAR", "CONFERENCE"):
+            if kw in desc:
+                return (5630, "Seminar & Conferences", Decimal("85"))
+        return None
+
+    # -- 5680 Donation to need peoples ------------------------------------
+    def _rule_donation(self, desc, amount):
+        if "DONATION" in desc or "195 HENRY" in desc:
+            return (5680, "Donation to need peoples", Decimal("85"))
+        return None
+
+    # -- 5240 PayPal (matches prior-year coding; low confidence -> review) -
+    def _rule_paypal(self, desc, amount):
+        if "PAYPAL" in desc:
+            return (5240, "Early Payment Purchase Discounts", Decimal("70"))
+        return None
+
+    # -- 2130 Employee tax deductions (payroll remittance) ----------------
+    def _rule_payroll_remit(self, desc, amount):
+        if "CANACT" in desc:
+            return (2130, "Employee tax deductions", Decimal("85"))
+        return None
+
+    # -- 2160 Payroll Clearing (recurring named payees) -------------------
+    #    Lower confidence: suggested account, still routed to human review.
+    def _rule_payroll_people(self, desc, amount):
+        for kw in ("MAURICIO EMILIAN", "CHRISTIANO OROZCO", "MARTHA EMILIANI",
+                   "EDGAR DURAN", "ANILSA MANRIQUE"):
+            if kw in desc:
+                return (2160, "Payroll Clearing", Decimal("70"))
+        return None
+
+    # -- 4020 Tithes (incoming deposits only) -----------------------------
+    def _rule_tithes(self, desc, amount):
+        if amount > 0 and ("E-TRANSFER" in desc or "INTERAC" in desc
+                           or "DEPOSIT" in desc):
+            return (4020, "Tithes", Decimal("85"))
+        return None
+
+    # -- 5800 Suspense (fallback) -----------------------------------------
+    def _rule_suspense_fallback(self, desc, amount):
+        return (self.SUSPENSE_GL, "Suspense", Decimal("0"))
+
+
+# ---------------------------------------------------------------------------
+# Client ruleset registry — BookkeepingAgent selects by client_id substring.
+# ---------------------------------------------------------------------------
+
+_CLIENT_RULESETS: dict[str, type] = {
+    "concetta":    ConcettaRuleset,
+    "theotherapy": TheotherapyRuleset,
+}
+
+
+def get_ruleset(client_id: str):
+    """Return a ruleset instance for *client_id* (substring match), or None."""
+    cid = (client_id or "").lower()
+    for key, cls in _CLIENT_RULESETS.items():
+        if key in cid:
+            return cls()
+    return None

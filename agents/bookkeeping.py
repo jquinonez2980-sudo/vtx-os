@@ -73,6 +73,13 @@ class BookkeepingAgent(AgentBase):
 
         client_id = payload.get("client_id", "").lower()
 
+        # Optional fiscal-start filter: drop transactions dated before min_date
+        # (e.g. a statement that straddles the prior fiscal year). "YYYY-MM-DD".
+        min_date = None
+        if md := payload.get("min_date"):
+            from datetime import date as _date
+            min_date = _date.fromisoformat(md) if isinstance(md, str) else md
+
         # Load custom rules if provided
         rules = DEFAULT_RULES
         if rules_path := payload.get("rules_json"):
@@ -94,10 +101,27 @@ class BookkeepingAgent(AgentBase):
                 error="No transactions parsed from CSV. Check file format and bank_code.",
             )
 
-        # --- 3. Categorize ---
-        if "concetta" in client_id:
-            categorized: list[CategorizedTransaction] = _categorize_concetta(
-                raw_txns, threshold=threshold
+        # --- 2b. Fiscal-start filter (drop pre-min_date rows) ---
+        dropped_pre = 0
+        if min_date is not None:
+            before = len(raw_txns)
+            raw_txns = [t for t in raw_txns if t.txn_date >= min_date]
+            dropped_pre = before - len(raw_txns)
+            if not raw_txns:
+                return TaskResult(
+                    task_id=request.task_id,
+                    task_type=TaskType.BOOKKEEPING_RUN,
+                    agent_id=self.agent_id,
+                    status=EventStatus.FAILURE,
+                    error=f"All {before} transactions are dated before {min_date}; nothing to book.",
+                )
+
+        # --- 3. Categorize (per-client ruleset if registered, else default rules) ---
+        from sage50.categorization_rules import get_ruleset
+        ruleset = get_ruleset(client_id)
+        if ruleset is not None:
+            categorized: list[CategorizedTransaction] = _categorize_with_ruleset(
+                raw_txns, ruleset, threshold=threshold
             )
         else:
             categorized = categorize_batch(raw_txns, rules=rules, threshold=threshold)
@@ -161,12 +185,15 @@ class BookkeepingAgent(AgentBase):
         )
 
         # mode="json" serialises Decimals → str, dates → ISO strings
+        out = summary.model_dump(mode="json")
+        if dropped_pre:
+            out["dropped_before_min_date"] = dropped_pre
         return TaskResult(
             task_id=request.task_id,
             task_type=TaskType.BOOKKEEPING_RUN,
             agent_id=self.agent_id,
             status=EventStatus.SUCCESS,
-            output=summary.model_dump(mode="json"),
+            output=out,
         )
 
 
@@ -200,30 +227,41 @@ def _load_rules(path: str) -> list[CategorizationRule]:
     return [CategorizationRule(**r) for r in data]
 
 
-def _categorize_concetta(
+def _categorize_with_ruleset(
     txns: list[BankTransaction],
+    ruleset,
     threshold: float,
 ) -> list[CategorizedTransaction]:
-    """Bridge between ConcettaRuleset and CategorizedTransaction.
+    """Bridge a per-client ruleset to CategorizedTransaction.
 
-    ConcettaRuleset returns (gl_no: int, gl_name: str, confidence_pct: Decimal)
-    where confidence is 0–100. Suspense (GL 5900, confidence 0) always needs_review.
+    A ruleset exposes categorize(description, amount) -> (gl_no: int,
+    gl_name: str, confidence_pct: Decimal) with confidence on a 0–100 scale.
+    Suspense rows return confidence 0, so the `confidence < threshold` check
+    routes them to needs_review automatically (no hard-coded suspense code).
     """
-    from sage50.categorization_rules import ConcettaRuleset
-    ruleset = ConcettaRuleset()
+    rule_tag = type(ruleset).__name__.replace("Ruleset", "").lower()
     result = []
     for txn in txns:
         gl_no_int, gl_name, confidence_pct = ruleset.categorize(txn.description, txn.amount)
         confidence = float(confidence_pct) / 100.0
         gl_no_str = str(gl_no_int)
-        needs_review = confidence < threshold or gl_no_int == 5900
+        needs_review = confidence < threshold
         result.append(CategorizedTransaction(
             **txn.model_dump(),
             gl_account_no=gl_no_str,
             gl_account_name=gl_name,
             category=gl_name,
             confidence=confidence,
-            matched_rule_id=f"concetta-gl{gl_no_str}",
+            matched_rule_id=f"{rule_tag}-gl{gl_no_str}",
             needs_review=needs_review,
         ))
     return result
+
+
+def _categorize_concetta(
+    txns: list[BankTransaction],
+    threshold: float,
+) -> list[CategorizedTransaction]:
+    """Back-compat shim — Concetta path via the generic ruleset bridge."""
+    from sage50.categorization_rules import ConcettaRuleset
+    return _categorize_with_ruleset(txns, ConcettaRuleset(), threshold)
