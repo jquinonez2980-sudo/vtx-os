@@ -141,7 +141,12 @@ if result.output.get("drafts"):
 # ---------------------------------------------------------------------------
 from agents.orchestrator import OrchestratorAgent
 
-with patch("sage50.bridge_reader.post_journal_entries") as mock_post:
+# Mock fetch_gl_transactions -> [] so the idempotency pre-check is hermetic:
+# this test asserts A2A dispatch reaches the bridge, independent of whatever real
+# Dec-2025 BNK entries the live Sage 50 bridge might return (which would otherwise
+# filter every draft as a duplicate and short-circuit before the post call).
+with patch("sage50.bridge_reader.post_journal_entries") as mock_post, \
+     patch("sage50.bridge_reader.fetch_gl_transactions", return_value=[]):
     mock_post.return_value = {"posted": 5, "total": 5, "errors": 0, "results": []}
     orch_req = TaskRequest(
         task_type=TaskType.POST_JOURNAL_ENTRIES,

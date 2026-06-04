@@ -55,16 +55,16 @@ GOOD_TEXT = (
 NOISE_TEXT = ("the quick brown fox jumps over the lazy dog " * 30) + "\n"
 
 
-def _fake_pymupdf(_path: Path) -> tuple[str, float, int]:
-    return NOISE_TEXT, 0.90, 1   # high conf, 0 txns
+def _fake_pymupdf(_path: Path) -> tuple[str, float, int, list[str]]:
+    return NOISE_TEXT, 0.90, 1, [NOISE_TEXT]   # high conf, 0 txns
 
 
-def _fake_pdfplumber(_path: Path) -> tuple[str, float, int]:
-    return GOOD_TEXT, 0.90, 1    # high conf, 2 txns
+def _fake_pdfplumber(_path: Path) -> tuple[str, float, int, list[str]]:
+    return GOOD_TEXT, 0.90, 1, [GOOD_TEXT]     # high conf, 2 txns
 
 
-def _fake_docai(_path: Path) -> tuple[str, float, int]:
-    return "", 0.0, 0
+def _fake_docai(_path: Path) -> tuple[str, float, int, list[str]]:
+    return "", 0.0, 0, []
 
 
 # ---------------------------------------------------------------------------

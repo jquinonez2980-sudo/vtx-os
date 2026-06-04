@@ -584,7 +584,7 @@ def benchmark(
     for name, fn in paths:
         t0 = time.perf_counter()
         try:
-            text, conf, pages = fn(path)
+            text, conf, pages, _page_texts = fn(path)
             bank_code = BankStatementExtractor._resolve_bank(text, "auto")
             txns_raw = parse_ocr_text(text, bank=bank_code)
             ms = int((time.perf_counter() - t0) * 1000)
