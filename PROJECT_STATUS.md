@@ -1,5 +1,5 @@
 # PROJECT_STATUS.md — Vertex AI Accounting OS
-# Updated: 2026-06-03  |  Session: 16  (CHQ payee extraction + year-end worksheet generator)
+# Updated: 2026-06-04  |  Session: 17  (Claude Code harness hardening — Phases 0–4 + skills/cleanup)
 # Trace: vtx-os-proj-001
 
 ## CURRENT PHASE
@@ -702,6 +702,41 @@ python scripts/year_end.py --client concetta --period 2026-04 \
 - 47 posting accounts | TB Debit = TB Credit = $350,368.99 (perfectly balanced)
 - Output: `R:\Concetta Enterprises Inc\Year End\concetta_yearend_2026-04.xlsx`
 - Status: ready for adjusting entries in **2. Adjusting Entries** tab
+
+## SESSION 17 CHANGES  [2026-06-04]
+Claude Code harness hardening — a 5-phase setup audit/implementation. Not product
+code; this makes the day-to-day bookkeeping work faster and safer to run with Claude.
+
+### Phase 0–1 (prior commits this session) — hygiene + safety rails
+- Consolidated 120 one-off permissions → 23 patterns; UTF-8 env in settings (e9cc761)
+- Write guard, permission carve-outs, pytest harness (`test_smoke_suite.py`/`pyproject.toml`),
+  CLAUDE.md rules (887ebbb). `guard-prod-writes.py` PreToolUse hook logs Sage/BQ-DML/secret/--commit.
+
+### Phase 2 — workflow skills  [commit 4a8fc37]
+`.claude/commands/`: `process-client-statement`, `reconcile-bank`, `post-journal-entries`
+— each wraps the matching `scripts/_*.py` with dry-run-first discipline + verification steps.
+
+### Phase 3 — review + tooling  [commit dd89d41]
+- `.claude/agents/financial-reviewer.md` — Opus subagent scoped to sign convention, Decimal,
+  balance chain, CRA rules, BQ-write verification
+- `.claude/commands/commit.md` — git discipline
+- settings: dotnet + Sage50Bridge + `mcp__ide__` permissions
+
+### Phase 4 — silent-write fix  [commit 969bc05]
+- `core/bq_loader.py`: `ensure_table` now diffs live schema vs the Pydantic model and adds
+  missing NULLABLE columns via `update_table` (closes the silent schema-drift drop, gotcha #10).
+  `load_rows` returns the ACTUAL inserted count (0 on exception, n−k on partial fail).
+- `tests/bq_loader_smoke.py` — 18/18 offline checks. BigQuery MCP evaluated and SKIPPED
+  (the `bq` CLI is already permitted; an MCP adds setup for no real gain).
+
+### Phase 5 — skills #2 + script hygiene  [this commit]
+- `.claude/commands/run-tests.md` — runs the offline suite or one named test
+- `.claude/commands/onboard-client.md` — registry row → ruleset → smoke test → first dry-run
+  (captures the theotherapy onboarding procedure; registry-driven, no daemon change)
+- Archived 9 one-off/session-specific diagnostics (`jan_*`, `april_*`, `apr_*`, `_debug_*`)
+  → `scripts/archive/` (gitignored from context) with a README. `scripts/` now holds only
+  durable tooling.
+- CLAUDE.md: documented the `.claude/` tooling; directory map notes archive + durable helpers.
 
 ## NEXT STEPS
 Year-end worksheet generated; ready for accounting work. Next priorities:

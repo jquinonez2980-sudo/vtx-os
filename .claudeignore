@@ -24,6 +24,9 @@ config/*.json
 # Log files
 *.log
 
+# Archived one-off / session-specific diagnostic scripts (kept for history, not active tooling)
+scripts/archive/
+
 # Pip install artifact
 =5.0.0
 

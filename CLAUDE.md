@@ -181,7 +181,10 @@ sage50/
   bridge_reader.py Reads Sage 50 .SAI via the C# Sage50Bridge.exe (see [[project_sage50_bridge_read_limitation]])
 
 scripts/             Operational CLIs + GCP setup (idempotent). Key: gmail_watcher.py (live
-                     inbox → route → extract → book), year_end.py, gmail_auth.py, purge_from_csv.py
+                     inbox → route → extract → book), year_end.py, gmail_auth.py, purge_from_csv.py.
+                     Durable single-statement helpers: _process_one / _reconcile / _post_je (see
+                     the matching .claude/commands skills). One-off session diagnostics live in
+                     scripts/archive/ (gitignored from context).
 functions/           Cloud Functions Gen 2 — gcs_ingest_trigger.py (Eventarc object.finalize → route)
 main.py              Cloud Functions entry point (1-line import of functions/gcs_ingest_trigger)
 demo/                monthly_close_demo.py — 6-agent close pipeline via A2A, shared session_id
@@ -405,6 +408,20 @@ Never write live tests that mutate production data without a cleanup step.
 ---
 
 ## Collaboration Workflow (How to Work with Claude)
+
+### Claude Code tooling (`.claude/`)
+
+Slash commands encode the recurring procedures (dry-run-first discipline + verification baked in):
+- `/process-client-statement` — Gmail inbox → OCR → route → book (wraps `_process_one.py`)
+- `/reconcile-bank` — validate CSVs against the balance column; SIGN_FLIP vs GAP (wraps `_reconcile.py`)
+- `/post-journal-entries` — BQ categorized → Sage 50 BNK entries; Sage-closed checklist (wraps `_post_je.py`)
+- `/onboard-client` — registry row → ruleset → smoke test → first dry-run statement
+- `/run-tests` — offline smoke suite (or one named test) via `test_smoke_suite.py`
+- `/commit` — project git discipline (imperative mood, never stage `data/`, status in same commit)
+
+`financial-reviewer` (subagent, Opus) reviews money-touching diffs against the sign/Decimal/
+balance-chain/CRA/BQ-write rules. `guard-prod-writes.py` (PreToolUse/Bash hook) logs Sage posts,
+BQ DML, secret writes, and `--commit` runs to `.claude/prod-writes.log`.
 
 ### Session Start
 
