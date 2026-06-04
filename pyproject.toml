@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# The project's tests are script-style; tests/test_smoke_suite.py wraps the
+# offline ones into a single parametrized pytest run. Only collect test_*.py so
+# the standalone *_smoke.py scripts aren't imported/executed twice.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

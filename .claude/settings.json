@@ -33,6 +33,30 @@
       "WebFetch(domain:google.github.io)",
       "WebFetch(domain:adk.dev)",
       "WebFetch(domain:cloud.google.com)"
+    ],
+    "ask": [
+      "Bash(gcloud secrets versions access *)",
+      "PowerShell(gcloud secrets versions access *)",
+      "Bash(.venv/Scripts/python.exe scripts/_post_je.py *)",
+      "Bash(.venv\\Scripts\\python.exe scripts/_post_je.py *)"
+    ],
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(git push -f *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".venv/Scripts/python.exe .claude/hooks/guard-prod-writes.py",
+            "statusMessage": "prod-write guard"
+          }
+        ]
+      }
     ]
   }
 }
