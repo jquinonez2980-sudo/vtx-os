@@ -122,21 +122,36 @@ def ensure_table(
     partition_field: str | None = None,
     cluster_fields: list[str] | None = None,
 ) -> str:
-    """Create the BQ table if it does not exist. Returns the full table ID."""
+    """Create the BQ table if it does not exist; add any missing columns if it does.
+
+    Returns the full table ID.  Only NULLABLE columns can be added to an existing
+    table (BQ restriction) — schema_from_model generates all fields as NULLABLE so
+    this is always safe.
+    """
     from google.cloud import bigquery
     from google.cloud.exceptions import NotFound
 
     table_id = f"{PROJECT}.{dataset}.{table_name}"
     client = _bq()
+    desired = schema_from_model(model_class)
 
     try:
-        client.get_table(table_id)
+        existing = client.get_table(table_id)
+        existing_names = {f.name for f in existing.schema}
+        new_fields = [f for f in desired if f.name not in existing_names]
+        if new_fields:
+            existing.schema = list(existing.schema) + new_fields
+            client.update_table(existing, ["schema"])
+            print(
+                f"[bq_loader] {table_id}: added {len(new_fields)} column(s): "
+                f"{[f.name for f in new_fields]}",
+                file=sys.stderr,
+            )
         return table_id
     except NotFound:
         pass
 
-    schema = schema_from_model(model_class)
-    table = bigquery.Table(table_id, schema=schema)
+    table = bigquery.Table(table_id, schema=desired)
 
     if partition_field:
         table.time_partitioning = bigquery.TimePartitioning(
@@ -205,11 +220,14 @@ def load_rows(
     try:
         errors = _bq().insert_rows_json(table_id, bq_rows)
         if errors:
-            _fallback(table_id, bq_rows, reason=f"insert errors: {errors}")
+            failed_indices = {e["index"] for e in errors}
+            failed_rows = [bq_rows[i] for i in sorted(failed_indices) if i < len(bq_rows)]
+            _fallback(table_id, failed_rows, reason=f"insert errors: {errors[:3]}")
+            return len(rows) - len(failed_indices)
+        return len(rows)
     except Exception as exc:
         _fallback(table_id, bq_rows, reason=str(exc))
-
-    return len(rows)
+        return 0
 
 
 def _fallback(table_id: str, rows: list[dict], reason: str) -> None:
