@@ -1,5 +1,5 @@
 # PROJECT_STATUS.md — Vertex AI Accounting OS
-# Updated: 2026-06-04  |  Session: 17  (Claude Code harness hardening — Phases 0–4 + skills/cleanup)
+# Updated: 2026-06-05  |  Session: 17  (harness hardening + investor materials + Vertex migration)
 # Trace: vtx-os-proj-001
 
 ## CURRENT PHASE
@@ -310,8 +310,8 @@ ADC note: ADC now configured (jquinonez2980@gmail.com) — all BQ writes are liv
                After review: re-run demo to send close email via live Gmail
              BQ tables written (live): vtx_accounting.bank_transactions_raw + categorized + gl_reconciliation
                                         + hst_returns | vtx_rag.document_chunks | vtx_audit.audit_log
-             Note: Vertex AI TextEmbeddingModel.from_pretrained deprecation warning (removal June 2026);
-                   migrate to google-genai SDK before that date
+             Note: Vertex AI TextEmbeddingModel.from_pretrained deprecation (removal June 2026)
+                   → RESOLVED in Session 17 (see Vertex migration below)
 
 ## ACCOUNTING AGENTS  [early work — not yet sequenced into phases]
 The following were built ahead of schedule. They will be properly sequenced into a later
@@ -738,7 +738,18 @@ code; this makes the day-to-day bookkeeping work faster and safer to run with Cl
   durable tooling.
 - CLAUDE.md: documented the `.claude/` tooling; directory map notes archive + durable helpers.
 
-### Phase 6 — investor demo + balance-header parser fix  [this commit]
+### 4-tuple regression fix  [commit 59f0e32]
+- `sage50/statement_extractor.py` `benchmark()` line 587: `text, conf, pages = fn(path)`
+  → `text, conf, pages, _page_texts = fn(path)` (Session 16 made all three paths return
+  4-tuples; benchmark was missed)
+- `tests/statement_extractor_smoke.py`: all three fake-path functions updated to return
+  4-tuples (`(text, conf, pages, [page_texts])`); test was 7/10, now 10/10
+- `tests/journal_entry_smoke.py` Test 6: added `patch("sage50.bridge_reader.fetch_gl_transactions",
+  return_value=[])` so idempotency pre-check is hermetic (was hitting real Sage 50 bridge
+  state in test environment); test was 39/41, now 41/41
+- Full offline suite: 17/17 suites, all green
+
+### Phase 6 — investor demo + balance-header parser fix  [commits 1a2db3a, d55e6ee]
 - `scripts/demo_run.py` — rehearsable, offline investor demo driver. Runs the
   full BOOKKEEPING_RUN pipeline on fictional data with mock BQ (no ADC/network),
   prints 5 narratable beats (ingest → verify → categorize/queue → audit → approve)
@@ -754,9 +765,28 @@ code; this makes the day-to-day bookkeeping work faster and safer to run with Cl
   helper matching any "balance" header variant; applied to all parsers.
 - `tests/bank_parser_smoke.py` (NEW) — 12/12 checks guarding balance-header
   variants + sign convention + chain reconciliation. Offline suite now 17/17.
+- `docs/investor-onepager.html` — AcumenAI single-page investor brief (HTML, Claude
+  aesthetic: ivory #F0EEE6, coral #CC785C, Fraunces + Inter). Sections: Hero, Problem,
+  Product (5-step flow), Proof (live metrics), Market (TAM/SAM/SOM funnel + 5-yr
+  trajectory), Moat, Roadmap, Ask ($2.5M seed). Market figures: TAM $8.0B (IBISWorld
+  2025 Canadian bookkeeping/accounting services), SAM $1.9B (1.08M SMBs × $1,750
+  tech-enabled bookkeeping spend, StatCan/ISED 2025), SOM $10.8M ARR (0.55% of SAM
+  at $999/mo). Print-safe. All "Vertex" references removed; AcumenAI brand throughout.
+
+### Vertex deprecation migration  [commit 6876179]
+`vertexai.language_models.TextEmbeddingModel.from_pretrained` was slated for removal
+June 2026. Migrated `agents/rag.py` to the `google-genai` SDK (Vertex AI backend),
+same model (`text-embedding-005`), same returned vectors:
+- `agents/rag.py`: replaced import with `google.genai.Client(vertexai=True, ...)`;
+  lazy `_client()` singleton; `_embed_texts()` calls `client.models.embed_content()`;
+  module-level `_genai_client = None` injectable by tests (mirrors `core.bq_loader._client`)
+- `tests/p2_5_rag_smoke.py`: dropped `with patch("vertexai.init"), patch("vertexai.language_models...")` blocks;
+  replaced with `_make_genai_mock()` + `agents.rag._genai_client = genai_mock` injection;
+  removed unused `patch`/`call` imports. 24/24 checks green.
+- Full offline suite: 17/17 suites, all green after migration.
 
 ## NEXT STEPS
-Year-end worksheet generated; ready for accounting work. Next priorities:
+Year-end worksheet generated; investor materials complete; all offline tests green. Next priorities:
 
 ### Immediate accounting tasks (Concetta 2026-04 year-end)
   1. Open `R:\Concetta Enterprises Inc\Year End\concetta_yearend_2026-04.xlsx`
