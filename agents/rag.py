@@ -36,7 +36,8 @@ Storage:
     BQ dataset: vtx_rag
     BQ table:   document_chunks  (FLOAT64 REPEATED embedding column)
 
-Embedding model: text-embedding-005 (Vertex AI; configurable via VTX_EMBEDDING_MODEL)
+Embedding model: text-embedding-005 (google-genai SDK, Vertex AI backend;
+                 configurable via VTX_EMBEDDING_MODEL)
 """
 
 from __future__ import annotations
@@ -51,7 +52,11 @@ from models.rag import DocumentChunk
 DATASET      = "vtx_rag"
 TABLE        = "document_chunks"
 _EMBED_MODEL = os.environ.get("VTX_EMBEDDING_MODEL", "text-embedding-005")
-_EMBED_BATCH = 250          # max texts per Vertex AI embedding request
+_EMBED_BATCH = 250          # max texts per embedding request
+
+# Lazily-created google-genai client (Vertex AI backend). Tests inject a mock by
+# setting agents.rag._genai_client directly, mirroring core.bq_loader._client.
+_genai_client = None
 
 
 class RagAgent(AgentBase):
@@ -211,25 +216,36 @@ def _chunk_text(text: str, chunk_size: int = 1000, overlap: int = 100) -> list[s
 
 
 # ---------------------------------------------------------------------------
-# Embedding (Vertex AI text-embedding-005)
+# Embedding (text-embedding-005 via the google-genai SDK, Vertex AI backend)
 # ---------------------------------------------------------------------------
+# Migrated off vertexai.language_models.TextEmbeddingModel.from_pretrained, which
+# is deprecated and slated for removal (June 2026). The google-genai SDK is the
+# supported path going forward; same model, same returned vectors.
+
+def _client():
+    """Return a cached google-genai client bound to the Vertex AI backend."""
+    global _genai_client
+    if _genai_client is None:
+        from google import genai
+        _genai_client = genai.Client(
+            vertexai=True,
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT", "vtx-accounting-os-prod"),
+            location=os.environ.get("GOOGLE_CLOUD_LOCATION", "northamerica-northeast1"),
+        )
+    return _genai_client
+
 
 def _embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed a list of strings using Vertex AI.  Returns one vector per text."""
-    import vertexai
-    from vertexai.language_models import TextEmbeddingModel
-
-    vertexai.init(
-        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "vtx-accounting-os-prod"),
-        location=os.environ.get("GOOGLE_CLOUD_LOCATION", "northamerica-northeast1"),
-    )
-    model = TextEmbeddingModel.from_pretrained(_EMBED_MODEL)
+    """Embed a list of strings via google-genai.  Returns one vector per text."""
+    if not texts:
+        return []
+    client = _client()
 
     vectors: list[list[float]] = []
     for i in range(0, len(texts), _EMBED_BATCH):
         batch = texts[i : i + _EMBED_BATCH]
-        embeddings = model.get_embeddings(batch)
-        vectors.extend(list(e.values) for e in embeddings)
+        response = client.models.embed_content(model=_EMBED_MODEL, contents=batch)
+        vectors.extend(list(e.values) for e in response.embeddings)
     return vectors
 
 
