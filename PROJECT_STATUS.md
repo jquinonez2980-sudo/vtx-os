@@ -811,12 +811,47 @@ AcumenAI dashboard — **Phase A** (the showcase artifact). Full plan in
   numbers, JSON-serializability, and the **BQ-singleton-reset safety contract**. Joins the
   `*smoke*` suite (now 19 suites, all green).
 
+### Brand/palette — FINALIZED (verified from the Orchelix repo)
+Orchelix repo is local: `C:\Users\JorgeJr\orhelix-website` (Next.js 16 + Tailwind v4).
+Design system: **Montserrat** + **JetBrains Mono**; navy `#0A2540` ink; **house accent teal
+`#14B8A6`**; Esmi = scoped dark cyan/purple. **AcumenAI inherits all of that and takes a
+distinct signature accent: amber/gold** (`gold-500 #D9A21B`, `-600 #B7791F`, `-50 #FBF3DD`,
+`-700 #8F5E16`). See memory `project_orchelix_brand_architecture`.
+
+### Showcase page — BUILT (in the Orchelix repo)
+- `app/globals.css` — added the `--color-gold-*` / `--gold-*` token scale (Tailwind v4 @theme).
+- `app/acumen/demo-run.json` — copy of the baked artifact (regen via vtx-os
+  `scripts/export_demo_json.py`).
+- `app/acumen/ShowcaseDemo.tsx` — "use client" component animating the five beats in a
+  gold-accented dark console (count-ups, staged reveal, "Run the demo").
+- `app/acumen/page.tsx` — `/acumen` route (Nav/Footer, hero, why-it's-different, CTA), navy +
+  gold, Montserrat. `tsc --noEmit` + `eslint` clean. (Nav link not added yet — page is at /acumen.)
+
+### Phase B API — BUILT (in vtx-os, offline-tested)
+- `dashboard/app.py` — FastAPI JSON API. Public: `/api/health`, `/api/demo/run` (baked at
+  startup via lifespan; globals reset). JWT-gated `/api/live/*`: summary, transactions,
+  reconciliation, hst, audit, approvals, clients, + `POST /approvals/{id}/{approve|reject|escalate}`
+  (reviewer = JWT email). CORS limited to the orchelix origin; sync `def` handlers (BQ is blocking).
+- `dashboard/auth.py` — provider-agnostic JWT validation (`pyjwt` + JWKS; iss/aud/exp);
+  `require_user` dependency. Config via env `AUTH_JWKS_URL`/`AUTH_ISSUER`/`AUTH_AUDIENCE` (public).
+- `dashboard/queries.py` — parameterized live BQ reads via `core.bq_loader._bq()`; Decimal/date
+  → JSON-safe. Writes reuse `core.approval_queue` (mock-compatible `job_configuration=`).
+- `Dockerfile` (repo root, python:3.14-slim + unixodbc; gunicorn/uvicorn binds `$PORT`) +
+  `.gcloudignore` (keeps `tests/` — demo capture reuses `tests/p1_7_e2e.MockBQClient`).
+- `scripts/deploy_dashboard.ps1` — idempotent SA + IAM (bigquery jobUser + dataEditor) +
+  `gcloud run deploy --source .` as `acumenai-api`; takes `-JwksUrl/-Issuer/-Audience/-CorsOrigin`.
+- `requirements.txt` += fastapi, uvicorn[standard], gunicorn, pyjwt[crypto].
+- `tests/dashboard_smoke.py` — now **49/49** (Phase A payload + the full API: auth gate 401,
+  RSA-signed JWT 200, period 422, every read endpoint, approve action w/ JWT reviewer). Suite
+  still 19 suites green.
+
 ### Still open / next for the dashboard
-- AcumenAI palette: inherit Orchelix neutrals + a **financial teal accent** (~`#0E7C66`,
-  placeholder); needs Orchelix's exact hexes/fonts (CSS/Tailwind or repo). The one-pager's
-  coral/ivory is the Claude prototype aesthetic, NOT the AcumenAI brand.
-- Phase B: build `dashboard/app.py` (FastAPI) + `auth.py` (JWT) + `queries.py` (live BQ) +
-  `deploy_dashboard.ps1`; build showcase + ops pages in the orchelix.com repo.
+- **Ops pages in the Orchelix repo** (Phase B frontend): add Clerk + an authed `/app` route
+  calling `acumenai-api` with a bearer JWT (KPI cards, approval queue, transactions). Scaffolded
+  next; needs live API + Clerk to fully verify.
+- **Live verification:** deploy `acumenai-api` (`scripts/deploy_dashboard.ps1`), set `AUTH_*`
+  once Clerk exists, and confirm an authed `/api/live/*` call against real BQ.
+- **Docker build** not yet built/run (no local Docker); first `gcloud run deploy` will exercise it.
 
 ## NEXT STEPS
 Year-end worksheet generated; investor materials complete; dashboard Phase A shipped; all

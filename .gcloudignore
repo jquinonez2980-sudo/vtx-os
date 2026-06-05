@@ -1,0 +1,32 @@
+# Build context trim for `gcloud run deploy --source .` (AcumenAI dashboard API).
+# NOTE: tests/ is intentionally KEPT — dashboard/demo.py reuses tests/p1_7_e2e.py
+# (MockBQClient) to bake the offline demo, same as scripts/demo_run.py.
+
+.git/
+.gitignore
+
+# Local Python env + caches
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Real/client data and local config (never ship)
+data/
+config/project.env
+config/*.json
+.env
+
+# One-off diagnostics + non-API components
+scripts/archive/
+sage50_bridge/
+
+# Claude tooling + plans
+.claude/
+
+# Node / Orchelix site is a separate repo — never in this context
+node_modules/
+
+# Docs / large binaries not needed at runtime
+*.pdf
+*.xlsx

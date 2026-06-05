@@ -45,6 +45,87 @@ def _bq_singletons_clear() -> bool:
             and core.approval_queue._bq_client is None)
 
 
+def _api_checks() -> None:
+    """FastAPI TestClient checks for the Phase B API — auth gate + read shapes.
+
+    Offline: a real RSA keypair signs a test JWT, the JWKS lookup is faked, and a
+    MockBQClient is injected AFTER lifespan startup (the startup demo-capture resets
+    the BQ singletons, so injecting earlier would be clobbered).
+    """
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from fastapi.testclient import TestClient
+
+    import dashboard.auth as auth_mod
+    from dashboard.app import app
+    from tests.p1_7_e2e import MockBQClient, _inject_mock
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub = key.public_key()
+    token = pyjwt.encode({"sub": "u-1", "email": "cpa@orchelix.com"}, key, algorithm="RS256")
+
+    class _FakeKey:
+        def __init__(self, k):
+            self.key = k
+
+    class _FakeJWKS:
+        def get_signing_key_from_jwt(self, _token):
+            return _FakeKey(pub)
+
+    auth_mod._jwks_client = lambda: _FakeJWKS()  # bypass the network JWKS fetch
+    hdr = {"Authorization": f"Bearer {token}"}
+
+    with TestClient(app) as client:
+        _inject_mock(MockBQClient())  # after startup reset
+
+        check("GET /api/health -> ok", client.get("/api/health").json().get("status") == "ok")
+        demo = client.get("/api/demo/run")
+        check("GET /api/demo/run -> 200 + five beats",
+              demo.status_code == 200 and "ingest" in demo.json().get("beats", {}))
+
+        # Auth gate
+        check("live/summary no token -> 401",
+              client.get("/api/live/summary", params={"period": "2025-12"}).status_code == 401)
+        check("live/summary bad token -> 401",
+              client.get("/api/live/summary", params={"period": "2025-12"},
+                         headers={"Authorization": "Bearer not.a.jwt"}).status_code == 401)
+
+        # Authed reads (mock BQ -> empty/zero shapes, 200)
+        s = client.get("/api/live/summary", params={"period": "2025-12"}, headers=hdr)
+        check("live/summary with token -> 200 + keys",
+              s.status_code == 200
+              and {"total_transactions", "net_movement", "pending_approvals"}.issubset(s.json()))
+        check("live/summary bad period -> 422",
+              client.get("/api/live/summary", params={"period": "nope"}, headers=hdr).status_code == 422)
+
+        for path in ("transactions", "hst", "audit", "approvals"):
+            params = {} if path in ("audit", "approvals") else {"period": "2025-12"}
+            resp = client.get(f"/api/live/{path}", params=params, headers=hdr)
+            check(f"live/{path} -> 200 list", resp.status_code == 200 and isinstance(resp.json(), list))
+
+        r = client.get("/api/live/reconciliation", params={"period": "2025-12"}, headers=hdr)
+        check("live/reconciliation -> 200 + matched key", r.status_code == 200 and "matched" in r.json())
+
+        cl = client.get("/api/live/clients", headers=hdr)
+        check("live/clients -> 200 list (graceful if registry absent)",
+              cl.status_code == 200 and isinstance(cl.json(), list))
+
+        act = client.post("/api/live/approvals/q-test/approve", params={"final_gl_no": "4100"}, headers=hdr)
+        check("POST approve -> 200 ok + reviewer from JWT",
+              act.status_code == 200 and act.json().get("ok") is True
+              and act.json().get("reviewer") == "cpa@orchelix.com")
+        check("POST approve without final_gl_no -> 422",
+              client.post("/api/live/approvals/q-test/approve", headers=hdr).status_code == 422)
+
+    # Restore singletons so nothing leaks into later code.
+    import core.approval_queue
+    import core.audit
+    import core.bq_loader
+    core.bq_loader._client = None
+    core.audit._client = None
+    core.approval_queue._bq_client = None
+
+
 def main() -> int:
     from dashboard.demo import build_demo_payload
 
@@ -138,6 +219,11 @@ def main() -> int:
     else:
         check("baked demo/demo_run.json present (run scripts/export_demo_json.py)",
               False, "artifact missing")
+
+    # ------------------------------------------------------------------ #
+    # Phase B API checks (FastAPI TestClient, offline)                     #
+    # ------------------------------------------------------------------ #
+    _api_checks()
 
     total = _passed + _failed
     print(f"\n{total}/{total} checks: {_passed} passed, {_failed} failed")

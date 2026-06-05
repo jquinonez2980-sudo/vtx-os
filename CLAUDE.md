@@ -188,6 +188,12 @@ scripts/             Operational CLIs + GCP setup (idempotent). Key: gmail_watch
 functions/           Cloud Functions Gen 2 — gcs_ingest_trigger.py (Eventarc object.finalize → route)
 main.py              Cloud Functions entry point (1-line import of functions/gcs_ingest_trigger)
 demo/                monthly_close_demo.py — 6-agent close pipeline via A2A, shared session_id
+                     demo_run.json — baked offline showcase artifact (regen: scripts/export_demo_json.py)
+dashboard/           AcumenAI (by Orchelix) dashboard JSON API for Cloud Run. app.py (FastAPI:
+                     public /api/health + /api/demo/run; JWT-gated /api/live/*), auth.py (provider
+                     JWT/JWKS via pyjwt), queries.py (live BQ reads via core.bq_loader._bq()),
+                     demo.py (offline 5-beat capture; resets BQ globals). UI is the separate
+                     orchelix.com repo. Deploy: scripts/deploy_dashboard.ps1 (root Dockerfile).
 sage50_bridge/       C# component — Sage50Bridge.exe wraps the Sage 50 SDK (build.ps1)
 docs/                BOOKKEEPER_GUIDE.md — manual bookkeeping runbook (startup → new client)
 
