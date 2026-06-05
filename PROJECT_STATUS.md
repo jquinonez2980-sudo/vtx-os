@@ -845,13 +845,24 @@ distinct signature accent: amber/gold** (`gold-500 #D9A21B`, `-600 #B7791F`, `-5
   RSA-signed JWT 200, period 422, every read endpoint, approve action w/ JWT reviewer). Suite
   still 19 suites green.
 
+### DEPLOYED — acumenai-api is live (2026-06-05)
+- **Service URL:** https://acumenai-api-lscziarcxa-pd.a.run.app (Cloud Run,
+  northamerica-northeast2, SA `vtx-dashboard-api-sa`, allow-unauthenticated; app enforces JWT).
+- Verified in prod: `/api/health` ok; `/api/demo/run` returns the baked payload (19/19
+  reconciled, 12/20, ~20ms — the in-container lifespan demo-capture + global-reset work);
+  `/api/live/summary` without a token → 401 (auth gate live). Docker image built clean on
+  Cloud Build (python:3.14-slim + full stack).
+- `scripts/deploy_dashboard.ps1` hardened through 3 real issues: (1) ASCII-only (PowerShell 5.1
+  mis-parses non-ASCII without BOM), (2) gcloud `--set-env-vars` alternate delimiter `^@^`
+  (CORS value contains commas), (3) `--quiet` (auto-create Artifact Registry repo).
+- **AUTH_JWKS_URL not yet set** → `/api/live/*` rejects all tokens (by design until Clerk).
+
 ### Still open / next for the dashboard
-- **Ops pages in the Orchelix repo** (Phase B frontend): add Clerk + an authed `/app` route
-  calling `acumenai-api` with a bearer JWT (KPI cards, approval queue, transactions). Scaffolded
-  next; needs live API + Clerk to fully verify.
-- **Live verification:** deploy `acumenai-api` (`scripts/deploy_dashboard.ps1`), set `AUTH_*`
-  once Clerk exists, and confirm an authed `/api/live/*` call against real BQ.
-- **Docker build** not yet built/run (no local Docker); first `gcloud run deploy` will exercise it.
+- **Clerk wiring** (Orchelix repo): install `@clerk/nextjs`, add `ClerkProvider` + `middleware.ts`,
+  swap `useAcumenToken` to `useAuth().getToken()` (steps in `app/app/README.md`). Then re-run
+  `scripts/deploy_dashboard.ps1 -JwksUrl <clerk-jwks> -Issuer <clerk-domain>` so the API trusts
+  Clerk tokens, and set `NEXT_PUBLIC_ACUMEN_API_BASE` to the service URL in Vercel.
+- Optional: add a nav link to `/acumen`; Clerk JWT template to log reviewer *email* (not user id).
 
 ## NEXT STEPS
 Year-end worksheet generated; investor materials complete; dashboard Phase A shipped; all
