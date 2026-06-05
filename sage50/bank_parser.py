@@ -101,6 +101,18 @@ def _detect_bank(headers: list[str]) -> BankCode:
 # Per-bank row parsers  →  (txn_date, description, raw_description, amount, balance, reference)
 # ---------------------------------------------------------------------------
 
+def _bal(row: dict):
+    """Read the running-balance column, tolerant of header variants.
+
+    TD/BMO/etc. exports label this column "Balance", but some (consistent with
+    their "Withdrawals ($)" / "Deposits ($)" columns) use "Balance ($)". Match
+    any header containing "balance" so the balance chain — the project's ground
+    truth for sign/amount verification — is never silently dropped.
+    """
+    key = next((k for k in row if "balance" in k.lower()), None)
+    return (_dec(row.get(key, "")) or None) if key else None
+
+
 def _parse_rbc(row: dict, idx: int) -> tuple:
     d = _parse_date(row.get("Transaction Date", ""))
     desc1 = row.get("Description 1", "")
@@ -116,7 +128,7 @@ def _parse_td(row: dict, idx: int) -> tuple:
     withdrawals = abs(_dec(row.get("Withdrawals ($)", "")))
     deposits    = _dec(row.get("Deposits ($)", ""))
     amount = deposits - withdrawals
-    bal = _dec(row.get("Balance", "")) or None
+    bal = _bal(row)
     return d, _clean_desc(raw), raw, amount, bal, None
 
 
@@ -124,7 +136,7 @@ def _parse_bmo(row: dict, idx: int) -> tuple:
     d = _parse_date(row.get("Date", ""))
     raw = row.get("Description", "")
     amount = _dec(row.get("Deposit", "")) - abs(_dec(row.get("Withdrawal", "")))
-    bal = _dec(row.get("Balance", "")) or None
+    bal = _bal(row)
     return d, _clean_desc(raw), raw, amount, bal, None
 
 
@@ -132,7 +144,7 @@ def _parse_cibc(row: dict, idx: int) -> tuple:
     d = _parse_date(row.get("Date", ""))
     raw = row.get("Description", "")
     amount = _dec(row.get("Credit", "")) - abs(_dec(row.get("Debit", "")))
-    bal = _dec(row.get("Balance", "")) or None
+    bal = _bal(row)
     return d, _clean_desc(raw), raw, amount, bal, None
 
 
@@ -140,7 +152,7 @@ def _parse_scotiabank(row: dict, idx: int) -> tuple:
     d = _parse_date(row.get("Date", ""))
     raw = row.get("Transaction", "")
     amount = _dec(row.get("Funds In", "")) - abs(_dec(row.get("Funds Out", "")))
-    bal = _dec(row.get("Balance", "")) or None
+    bal = _bal(row)
     return d, _clean_desc(raw), raw, amount, bal, None
 
 
@@ -148,7 +160,7 @@ def _parse_national(row: dict, idx: int) -> tuple:
     d = _parse_date(row.get("Date", ""))
     raw = row.get("Description", "")
     amount = _dec(row.get("Deposits", "")) - abs(_dec(row.get("Withdrawals", "")))
-    bal = _dec(row.get("Balance", "")) or None
+    bal = _bal(row)
     return d, _clean_desc(raw), raw, amount, bal, None
 
 
@@ -156,7 +168,7 @@ def _parse_desjardins(row: dict, idx: int) -> tuple:
     d = _parse_date(row.get("Date", ""))
     raw = row.get("Description", "")
     amount = _dec(row.get("Deposit", "")) - abs(_dec(row.get("Withdrawal", "")))
-    bal = _dec(row.get("Balance", "")) or None
+    bal = _bal(row)
     ref = row.get("No", None)
     return d, _clean_desc(raw), raw, amount, bal, ref
 

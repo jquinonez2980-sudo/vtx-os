@@ -738,6 +738,23 @@ code; this makes the day-to-day bookkeeping work faster and safer to run with Cl
   durable tooling.
 - CLAUDE.md: documented the `.claude/` tooling; directory map notes archive + durable helpers.
 
+### Phase 6 — investor demo + balance-header parser fix  [this commit]
+- `scripts/demo_run.py` — rehearsable, offline investor demo driver. Runs the
+  full BOOKKEEPING_RUN pipeline on fictional data with mock BQ (no ADC/network),
+  prints 5 narratable beats (ingest → verify → categorize/queue → audit → approve)
+  in <1s. Reuses the proven MockBQClient from p1_7_e2e.
+- `demo/sample_statement.csv` — self-contained FICTIONAL demo data (Northview
+  Consulting), ISO dates, committable (not the gitignored test set).
+- `docs/investor-demo-runbook.md` — 90-second narration script, optional live
+  Gmail tier (`gmail_watcher --once --dry-run`), fallback plan, Q&A answers.
+- **Real bug fixed** in `sage50/bank_parser.py`: all 6 bank parsers read
+  `row.get("Balance")` but TD exports use `Balance ($)` (matching their
+  `Withdrawals ($)`/`Deposits ($)` columns) — so the balance column, the
+  project's ground truth (gotcha #11), was silently dropped. Added `_bal()`
+  helper matching any "balance" header variant; applied to all parsers.
+- `tests/bank_parser_smoke.py` (NEW) — 12/12 checks guarding balance-header
+  variants + sign convention + chain reconciliation. Offline suite now 17/17.
+
 ## NEXT STEPS
 Year-end worksheet generated; ready for accounting work. Next priorities:
 
