@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AcumenAI — Investor Overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F0EEE6;
+    --bg-card:#F7F5EF;
+    --ink:#1A1915;
+    --muted:#6B6B66;
+    --line:#DCD9CE;
+    --accent:#CC785C;
+    --accent-soft:#E9D3C7;
+    --maxw:920px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Inter",-apple-system,system-ui,sans-serif;
+    font-size:17px;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{font-family:"Fraunces",Georgia,serif;font-weight:500;letter-spacing:-0.01em;line-height:1.12;margin:0;}
+  .accent{color:var(--accent);}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 32px;}
+
+  /* sticky minimal nav */
+  nav{
+    position:sticky;top:0;z-index:10;
+    background:rgba(240,238,230,0.88);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:60px;}
+  nav .brand{font-family:"Fraunces",serif;font-size:20px;font-weight:600;}
+  nav .brand .dot{color:var(--accent);}
+  nav .links{display:flex;gap:26px;font-size:14px;color:var(--muted);}
+  nav .links a{color:var(--muted);text-decoration:none;transition:color .15s;}
+  nav .links a:hover{color:var(--ink);}
+  @media(max-width:720px){nav .links{display:none;}}
+
+  section{padding:78px 0;border-bottom:1px solid var(--line);}
+  section:last-of-type{border-bottom:none;}
+  .eyebrow{font-size:13px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--accent);margin-bottom:18px;}
+
+  /* hero */
+  .hero{padding:96px 0 84px;}
+  .hero h1{font-size:clamp(40px,6vw,68px);max-width:14ch;}
+  .hero .lede{font-size:clamp(19px,2.4vw,23px);color:var(--muted);max-width:54ch;margin-top:26px;line-height:1.5;}
+  .hero .tag{display:inline-block;margin-top:30px;font-size:14px;color:var(--accent);border:1px solid var(--accent-soft);background:var(--bg-card);padding:7px 15px;border-radius:999px;}
+
+  h2{font-size:clamp(28px,3.6vw,38px);max-width:20ch;}
+  .sub{color:var(--muted);max-width:60ch;margin-top:16px;}
+
+  /* flow */
+  .flow{display:grid;grid-template-columns:repeat(5,1fr);gap:0;margin-top:44px;}
+  .flow .step{position:relative;padding:22px 16px 22px 0;}
+  .flow .step .n{font-family:"Fraunces",serif;font-size:15px;color:var(--accent);font-weight:600;}
+  .flow .step h3{font-size:18px;margin:8px 0 6px;}
+  .flow .step p{font-size:14px;color:var(--muted);margin:0;line-height:1.45;}
+  .flow .step:not(:last-child)::after{content:"→";position:absolute;right:8px;top:24px;color:var(--accent);opacity:.5;}
+  @media(max-width:760px){.flow{grid-template-columns:1fr 1fr;}.flow .step::after{display:none;}}
+
+  /* proof metrics */
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:40px;}
+  .metric{background:var(--bg-card);border:1px solid var(--line);border-radius:14px;padding:26px 22px;}
+  .metric .v{font-family:"Fraunces",serif;font-size:34px;font-weight:600;line-height:1;}
+  .metric .l{font-size:13.5px;color:var(--muted);margin-top:10px;line-height:1.4;}
+  @media(max-width:720px){.metrics{grid-template-columns:1fr 1fr;}}
+
+  .callout{background:var(--bg-card);border-left:3px solid var(--accent);border-radius:0 12px 12px 0;padding:22px 26px;margin-top:38px;font-family:"Fraunces",serif;font-size:20px;line-height:1.45;}
+
+  /* market funnel */
+  .funnel{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:42px;}
+  .fcard{background:var(--bg-card);border:1px solid var(--line);border-radius:14px;padding:26px 24px;}
+  .fcard .k{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);}
+  .fcard .v{font-family:"Fraunces",serif;font-size:40px;font-weight:600;line-height:1;margin:12px 0 4px;}
+  .fcard .unit{font-size:14px;color:var(--muted);}
+  .fcard .d{font-size:13.5px;color:var(--muted);margin-top:14px;line-height:1.45;}
+  @media(max-width:720px){.funnel{grid-template-columns:1fr;}}
+
+  /* trajectory table */
+  .traj{width:100%;border-collapse:collapse;margin-top:38px;font-size:15px;}
+  .traj th,.traj td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);}
+  .traj th{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}
+  .traj td.v{font-family:"Fraunces",serif;font-weight:600;}
+  .traj tr:last-child td{border-bottom:none;background:var(--bg-card);}
+  .traj .note{font-size:12.5px;color:var(--muted);margin-top:12px;font-style:italic;}
+
+  /* use of funds bar */
+  .uof{margin-top:30px;}
+  .uof .bar{display:flex;height:14px;border-radius:7px;overflow:hidden;}
+  .uof .bar span{display:block;height:100%;}
+  .uof .legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;font-size:13.5px;color:#C9C7BD;}
+  .uof .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:7px;vertical-align:middle;}
+
+  /* moat list */
+  .moat{display:grid;grid-template-columns:1fr 1fr;gap:30px 48px;margin-top:42px;}
+  .moat .item h3{font-size:19px;margin-bottom:8px;}
+  .moat .item h3 .mk{color:var(--accent);margin-right:8px;}
+  .moat .item p{font-size:15px;color:var(--muted);margin:0;}
+  @media(max-width:720px){.moat{grid-template-columns:1fr;}}
+
+  /* roadmap two-col */
+  .road{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:42px;}
+  .road .col h3{font-size:18px;margin-bottom:18px;display:flex;align-items:center;gap:10px;}
+  .road .col h3 .badge{font-family:"Inter",sans-serif;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:4px 9px;border-radius:6px;}
+  .road .built .badge{background:#DCE7DC;color:#3B6B45;}
+  .road .next .badge{background:var(--accent-soft);color:#9A4D32;}
+  .road ul{list-style:none;margin:0;padding:0;}
+  .road li{font-size:15px;padding:9px 0 9px 26px;position:relative;border-top:1px solid var(--line);color:var(--ink);}
+  .road li:first-child{border-top:none;}
+  .road .built li::before{content:"✓";position:absolute;left:0;color:#3B6B45;font-weight:600;}
+  .road .next li::before{content:"→";position:absolute;left:0;color:var(--accent);}
+  .road li span{color:var(--muted);font-size:13.5px;}
+  @media(max-width:720px){.road{grid-template-columns:1fr;}}
+
+  /* ask */
+  .ask{background:var(--ink);color:var(--bg);border-radius:18px;padding:54px 48px;margin-top:8px;}
+  .ask .eyebrow{color:var(--accent-soft);}
+  .ask h2{color:var(--bg);}
+  .ask p{color:#C9C7BD;max-width:56ch;margin-top:16px;}
+  .ask .row{display:flex;gap:40px;margin-top:34px;flex-wrap:wrap;}
+  .ask .row div .v{font-family:"Fraunces",serif;font-size:26px;color:var(--accent-soft);}
+  .ask .row div .l{font-size:13px;color:#9C9A90;margin-top:4px;}
+
+  footer{padding:40px 0;text-align:center;color:var(--muted);font-size:12.5px;}
+  footer .conf{color:var(--accent);font-weight:600;letter-spacing:.04em;}
+
+  @media print{
+    nav{display:none;}
+    section{padding:34px 0;page-break-inside:avoid;border-bottom:1px solid var(--line);}
+    .hero{padding:30px 0;}
+    body{font-size:13px;}
+    .ask{background:var(--bg-card);color:var(--ink);border:1px solid var(--line);}
+    .ask h2,.ask p,.ask .row div .v{color:var(--ink);}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand">Acumen<span class="dot">AI</span></div>
+    <div class="links">
+      <a href="#problem">Problem</a>
+      <a href="#product">Product</a>
+      <a href="#proof">Proof</a>
+      <a href="#market">Market</a>
+      <a href="#moat">Moat</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#ask">Ask</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">AI Accounting Infrastructure · Canadian SMBs</div>
+    <h1>From a shoebox of bank statements to filed books — <span class="accent">with a human approving, not keying.</span></h1>
+    <p class="lede">AcumenAI ingests a client's bank statements by email, extracts and categorizes every transaction, reconciles it against the bank's own balance, and posts approved entries straight into Sage&nbsp;50 — with an immutable audit trail on every step.</p>
+    <span class="tag">● Live today on real client books — not a synthetic prototype</span>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="eyebrow">The Problem</div>
+    <h2>Bookkeeping for Canadian SMBs is still manual, late, and error-prone.</h2>
+    <p class="sub">Bookkeepers spend hours each month keying PDF and scanned bank statements into Sage&nbsp;50 by hand — mis-signing transactions, missing cheques, and racing HST deadlines. The data is already structured; the bottleneck is extraction, categorization, and <em>trust</em>.</p>
+    <div class="callout">The bank's running balance is ground truth. AcumenAI uses it to mathematically verify every transaction — catching the sign-flips and dropped rows that manual entry misses.</div>
+  </div>
+</section>
+
+<section id="product">
+  <div class="wrap">
+    <div class="eyebrow">The Product</div>
+    <h2>Email a statement in. Approve the result. The books are done.</h2>
+    <p class="sub">A registry-driven pipeline routes each statement to the right client by its account number — no manual sorting, and never one client's money booked into another's ledger.</p>
+    <div class="flow">
+      <div class="step"><div class="n">01</div><h3>Ingest</h3><p>Statement arrives by email; PDF text or scanned-image OCR extracted automatically.</p></div>
+      <div class="step"><div class="n">02</div><h3>Route</h3><p>Matched to the right client by the account number on the page.</p></div>
+      <div class="step"><div class="n">03</div><h3>Categorize</h3><p>Per-client learned rules assign GL accounts with a confidence score.</p></div>
+      <div class="step"><div class="n">04</div><h3>Reconcile</h3><p>Every amount validated against the bank's own balance chain.</p></div>
+      <div class="step"><div class="n">05</div><h3>Approve & Post</h3><p>One-click human review, then posted into Sage&nbsp;50.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="proof">
+  <div class="wrap">
+    <div class="eyebrow">The Proof</div>
+    <h2>Taken end-to-end on a real client, on live infrastructure.</h2>
+    <p class="sub">Client&nbsp;A — an Ontario incorporated SMB — processed from raw bank statements through to a balanced year-end worksheet and a computed HST return. Figures anonymized.</p>
+    <div class="metrics">
+      <div class="metric"><div class="v">7</div><div class="l">Canadian bank formats auto-detected</div></div>
+      <div class="metric"><div class="v">100%</div><div class="l">Transaction recall on an 18&nbsp;MB scanned statement</div></div>
+      <div class="metric"><div class="v">$350K</div><div class="l">Year-end trial balance — balanced to the cent</div></div>
+      <div class="metric"><div class="v">$5.6K</div><div class="l">HST net tax computed & filing-ready</div></div>
+    </div>
+    <div class="callout">Statements → categorized → reconciled → HST return → year-end worksheet → journal entries posted to Sage&nbsp;50. A second client is onboarding now with zero code changes — just a registry row.</div>
+  </div>
+</section>
+
+<section id="market">
+  <div class="wrap">
+    <div class="eyebrow">The Market</div>
+    <h2>A small share of a large, recurring, regulation-driven market.</h2>
+    <p class="sub">Every one of Canada's 1.08&nbsp;million small businesses needs monthly books and an HST return — non-discretionary, recurring spend. We're not creating demand; we're automating the labor behind it.</p>
+    <div class="funnel">
+      <div class="fcard">
+        <div class="k">TAM</div>
+        <div class="v">$8.0B<span class="unit">/yr</span></div>
+        <div class="d">Canadian payroll &amp; bookkeeping services spend (2025). Expands to $30.3B across all accounting &amp; tax.</div>
+      </div>
+      <div class="fcard">
+        <div class="k">SAM</div>
+        <div class="v">$1.9B<span class="unit">/yr</span></div>
+        <div class="d">1.08M small businesses × ~$1,800 addressable annual bookkeeping spend.</div>
+      </div>
+      <div class="fcard">
+        <div class="k">SOM · 5-yr</div>
+        <div class="v">$10.8M<span class="unit"> ARR</span></div>
+        <div class="d">6,000 clients — just 0.55% of Canadian small businesses.</div>
+      </div>
+    </div>
+    <table class="traj">
+      <thead><tr><th>Year</th><th>Clients</th><th>ARR</th><th>Share of market</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>25</td><td class="v">~$45K</td><td>&lt;0.01%</td></tr>
+        <tr><td>2</td><td>150</td><td class="v">~$270K</td><td>0.01%</td></tr>
+        <tr><td>3</td><td>600</td><td class="v">~$1.1M</td><td>0.06%</td></tr>
+        <tr><td>4</td><td>2,000</td><td class="v">~$3.6M</td><td>0.19%</td></tr>
+        <tr><td>5</td><td>6,000</td><td class="v">~$10.8M</td><td>0.55%</td></tr>
+      </tbody>
+    </table>
+    <p class="traj note">Illustrative trajectory at $150/mo ACV and ~80% software-led gross margin. Not a forecast or commitment.</p>
+    <div class="callout">A human bookkeeper handles 30–50 clients. AcumenAI lets one operator handle 200+. We don't just sell into a $8B market — we collapse the labor cost of a $30B one.</div>
+  </div>
+</section>
+
+<section id="moat">
+  <div class="wrap">
+    <div class="eyebrow">Why It Defends</div>
+    <h2>The moat is trust and accumulated client knowledge.</h2>
+    <div class="moat">
+      <div class="item"><h3><span class="mk">◆</span>Immutable audit trail</h3><p>Every action writes to an append-only log — never silently fails. The compliance story regulators and accountants require.</p></div>
+      <div class="item"><h3><span class="mk">◆</span>Balance-chain verification</h3><p>Math, not heuristics. The bank's own balance proves each entry's sign and amount before anything is booked.</p></div>
+      <div class="item"><h3><span class="mk">◆</span>Per-client learned rulesets</h3><p>Each client's categorization gets smarter over time and is portable across their banks. Switching cost compounds.</p></div>
+      <div class="item"><h3><span class="mk">◆</span>Multi-agent architecture</h3><p>Nine specialized agents (ingest, reconcile, HST, RAG, comms…) coordinating over Google's ADK — extensible to new tax forms and exports.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="wrap">
+    <div class="eyebrow">Where We Are</div>
+    <h2>Built and proven — and a clear path to scale.</h2>
+    <div class="road">
+      <div class="col built">
+        <h3><span class="badge">Built</span> Working end-to-end</h3>
+        <ul>
+          <li>Email → OCR → route → categorize pipeline</li>
+          <li>7-bank parsing + scanned-PDF OCR</li>
+          <li>Balance-chain reconciliation + approval queue</li>
+          <li>HST/GST return computation</li>
+          <li>Year-end worksheet generation</li>
+          <li>Journal-entry posting into Sage&nbsp;50</li>
+          <li>Immutable audit log on every step</li>
+          <li>Live run on a real client <span>· 2nd onboarding</span></li>
+        </ul>
+      </div>
+      <div class="col next">
+        <h3><span class="badge">Next</span> Path to 50 clients</h3>
+        <ul>
+          <li>Client & bookkeeper dashboard <span>· first customer-facing UI</span></li>
+          <li>Multi-tenant hardening <span>· auth, roles, monitoring</span></li>
+          <li>Direct Sage&nbsp;50 ODBC integration</li>
+          <li>T2 corporate tax-return agent</li>
+          <li>Onboarding automation at scale</li>
+          <li>SOC-2 / data-handling posture</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="ask">
+  <div class="wrap">
+    <div class="ask">
+      <div class="eyebrow">The Ask</div>
+      <h2>Raising $2.5M seed to turn a working engine into a product.</h2>
+      <p>We've de-risked the hard part — accurate, auditable extraction and posting on real books. This round funds the customer-facing layer and the team to onboard the first paying cohort, with an 18-month runway to ~$1M ARR.</p>
+      <div class="row">
+        <div><div class="v">$2.5M</div><div class="l">Seed round</div></div>
+        <div><div class="v">~$10–12M</div><div class="l">Post-money · within AI-seed norms</div></div>
+        <div><div class="v">18 mo</div><div class="l">Runway to ~$1M ARR &amp; Series&nbsp;A</div></div>
+      </div>
+      <div class="uof">
+        <div class="bar">
+          <span style="width:45%;background:#CC785C;"></span>
+          <span style="width:30%;background:#E0A088;"></span>
+          <span style="width:15%;background:#9A8C7A;"></span>
+          <span style="width:10%;background:#6B6B66;"></span>
+        </div>
+        <div class="legend">
+          <span><i style="background:#CC785C;"></i>Product · 45% <span style="color:#9C9A90;">— dashboard, multi-tenant, ODBC</span></span>
+          <span><i style="background:#E0A088;"></i>Go-to-market · 30% <span style="color:#9C9A90;">— first paying cohort</span></span>
+          <span><i style="background:#9A8C7A;"></i>Compliance &amp; ops · 15% <span style="color:#9C9A90;">— SOC&nbsp;2, security</span></span>
+          <span><i style="background:#6B6B66;"></i>Buffer · 10%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span class="conf">CONFIDENTIAL</span> — Prepared for investor discussion. Client figures anonymized; market figures sourced (IBISWorld, StatCan, ISED Canada 2025). Financial projections are illustrative, not commitments. © 2026 AcumenAI.
+  </div>
+</footer>
+
+</body>
+</html>
