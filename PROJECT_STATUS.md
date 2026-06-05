@@ -1,5 +1,5 @@
 # PROJECT_STATUS.md — Vertex AI Accounting OS
-# Updated: 2026-06-05  |  Session: 17  (harness hardening + investor materials + Vertex migration)
+# Updated: 2026-06-05  |  Session: 18  (AcumenAI dashboard — Phase A showcase artifact)
 # Trace: vtx-os-proj-001
 
 ## CURRENT PHASE
@@ -785,8 +785,42 @@ same model (`text-embedding-005`), same returned vectors:
   removed unused `patch`/`call` imports. 24/24 checks green.
 - Full offline suite: 17/17 suites, all green after migration.
 
+## SESSION 18 CHANGES  [2026-06-05]
+AcumenAI dashboard — **Phase A** (the showcase artifact). Full plan in
+`.claude/plans/enumerated-mapping-willow.md`.
+
+### Product/brand decision (see memory `project_orchelix_brand_architecture`)
+- **Orchelix** (orchelix.com — Next.js/Vercel, verified) is the **parent AI-agent platform**.
+  Products: **Esmi** (AI receptionist/lead-gen) and **AcumenAI** (this accounting & finance OS,
+  = vtx-os). Dashboard is branded **"AcumenAI by Orchelix"**; canonical spelling **AcumenAI**.
+- Dashboard architecture (Phase B, later): **UI lives in the orchelix.com repo** (Next.js);
+  **Cloud Run hosts a pure JSON API** built in vtx-os; auth via the site's IdP (**Clerk** rec.)
+  validated as a **JWT** by the API (`pyjwt`). No shared-password gate.
+
+### Phase A — showcase demo artifact (this repo, shipped)
+- **`dashboard/__init__.py` + `dashboard/demo.py`** — `build_demo_payload(approve=True)` runs
+  the SAME offline pipeline as `scripts/demo_run.py` (Northview fictional data, MockBQClient,
+  mocked httpx) and returns a JSON-safe dict of the five beats (ingest / verify / categorize /
+  audit / approve) + recap timing. **Safety:** injects the mock, and **always resets the BQ
+  singletons to None in a `finally`** so nothing leaks into live mode.
+- **`scripts/export_demo_json.py`** — bakes `demo/demo_run.json`, the artifact the orchelix.com
+  showcase page animates (no backend, no auth — can't fail mid-pitch). Deterministic/offline.
+- **`demo/demo_run.json`** — committed artifact (20 txns, balance chain 19/19, 12/20 auto-
+  categorized, 7 audit events, one approval, ~8 ms).
+- **`tests/dashboard_smoke.py`** — 35/35 offline checks: payload shape, the five beats, headline
+  numbers, JSON-serializability, and the **BQ-singleton-reset safety contract**. Joins the
+  `*smoke*` suite (now 19 suites, all green).
+
+### Still open / next for the dashboard
+- AcumenAI palette: inherit Orchelix neutrals + a **financial teal accent** (~`#0E7C66`,
+  placeholder); needs Orchelix's exact hexes/fonts (CSS/Tailwind or repo). The one-pager's
+  coral/ivory is the Claude prototype aesthetic, NOT the AcumenAI brand.
+- Phase B: build `dashboard/app.py` (FastAPI) + `auth.py` (JWT) + `queries.py` (live BQ) +
+  `deploy_dashboard.ps1`; build showcase + ops pages in the orchelix.com repo.
+
 ## NEXT STEPS
-Year-end worksheet generated; investor materials complete; all offline tests green. Next priorities:
+Year-end worksheet generated; investor materials complete; dashboard Phase A shipped; all
+offline tests green. Next priorities:
 
 ### Immediate accounting tasks (Concetta 2026-04 year-end)
   1. Open `R:\Concetta Enterprises Inc\Year End\concetta_yearend_2026-04.xlsx`

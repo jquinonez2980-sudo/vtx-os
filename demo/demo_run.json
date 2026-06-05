@@ -1,0 +1,54 @@
+{
+  "brand": "AcumenAI by Orchelix",
+  "client": "Northview Consulting Inc.",
+  "period": "2025-12",
+  "mode": "offline · mock infrastructure · fictional data",
+  "generated_at": "2026-06-05T18:12:02+00:00",
+  "ok": true,
+  "beats": {
+    "ingest": {
+      "transactions": 20,
+      "bank_code": "TD",
+      "money_in": "26714.22",
+      "money_out": "47149.63",
+      "deposits": 4,
+      "payments": 16
+    },
+    "verify": {
+      "reconciled": 19,
+      "total": 19,
+      "all_reconciled": true
+    },
+    "categorize": {
+      "total": 20,
+      "auto_categorized": 12,
+      "needs_review": 8,
+      "queued": 8,
+      "auto_pct": 60,
+      "chat_notified": true
+    },
+    "audit": {
+      "event_count": 7,
+      "event_types": [
+        "AGENT_COMPLETE",
+        "AGENT_START",
+        "TASK_COMPLETE",
+        "TASK_CREATED",
+        "TASK_DELEGATED"
+      ]
+    },
+    "approve": {
+      "pending_before": 8,
+      "pending_after": 7,
+      "approved": {
+        "txn_date": "2025-12-02",
+        "description": "INTERAC e-TRANSFER FROM SUMMIT TECH GROUP REF",
+        "final_gl_no": "4100"
+      }
+    }
+  },
+  "recap": {
+    "duration_ms": 8,
+    "headline": "A bank statement became reviewed, categorized, balance-verified books — with a full audit trail — in 8 ms."
+  }
+}
