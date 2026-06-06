@@ -25,7 +25,7 @@ from typing import Any
 
 CREDENTIAL_SECRET = "vtx-gmail-oauth-credentials"
 FROM_EMAIL = "jquinonez2980@gmail.com"
-_DEFAULT_QUERY = "is:unread has:attachment filename:pdf in:inbox"
+_DEFAULT_QUERY = "is:unread has:attachment (filename:pdf OR filename:csv) in:inbox"
 _SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.modify",
@@ -260,20 +260,23 @@ def _build_raw_message(
 
 
 def _walk_parts(part: dict, results: list[dict]) -> None:
-    """Recursively collect PDF attachment metadata from a MIME part tree."""
+    """Recursively collect PDF and CSV attachment metadata from a MIME part tree."""
     if "parts" in part:
         for p in part["parts"]:
             _walk_parts(p, results)
         return
     mime  = part.get("mimeType", "")
     fname = part.get("filename", "")
-    if mime == "application/pdf" or fname.lower().endswith(".pdf"):
+    fname_lower = fname.lower()
+    is_pdf = mime == "application/pdf" or fname_lower.endswith(".pdf")
+    is_csv = mime in ("text/csv", "application/csv") or fname_lower.endswith(".csv")
+    if is_pdf or is_csv:
         att_id = part.get("body", {}).get("attachmentId")
         size   = part.get("body", {}).get("size", 0)
         if att_id:
             results.append({
                 "attachment_id": att_id,
-                "filename":      fname or "attachment.pdf",
+                "filename":      fname or ("attachment.csv" if is_csv else "attachment.pdf"),
                 "size":          size,
             })
 

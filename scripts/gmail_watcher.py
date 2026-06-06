@@ -53,12 +53,17 @@ _DEFAULT_INTERVAL = 300  # seconds
 _UNROUTED_LABEL = "vtx-unrouted"
 
 
-def _pin_client(registry: dict, slug: str):
-    """Return the registry entry whose client_id matches *slug* (for --client)."""
-    for cfg in registry.values():
-        if cfg.client_id.lower() == slug.lower():
-            return cfg
-    known = ", ".join(sorted(c.client_id for c in registry.values())) or "(none)"
+def _pin_client(registry: dict, slug: str) -> list:
+    """Return ALL registry entries whose client_id matches *slug* (for --client).
+
+    Clients with multiple bank accounts (e.g. two BMO accounts) have several
+    registry rows sharing the same client_id.  Returning all of them lets the
+    routing check accept any of their account numbers rather than just the first.
+    """
+    matches = [cfg for cfg in registry.values() if cfg.client_id.lower() == slug.lower()]
+    if matches:
+        return matches
+    known = ", ".join(sorted({c.client_id for c in registry.values()})) or "(none)"
     raise SystemExit(f"Unknown --client '{slug}'. Known clients: {known}")
 
 
@@ -262,14 +267,19 @@ def _process_pdf(
     # book until resolved.
     matched = find_account_in_text(ext.text, registry)
     if pinned is not None:
-        # Manual --client pin: refuse only if the statement positively matches a
-        # DIFFERENT registered client. A non-match (matched is None) trusts the pin.
-        if matched and matched != pinned.account_no:
-            print(f"    Client : UNROUTED — statement account {matched} ≠ pinned "
-                  f"{pinned.client_id} ({pinned.account_masked})")
-            return {"unrouted": True, "reason": "account mismatch vs pinned --client",
-                    "parsed_account": matched, "fname": fname}
-        cfg = pinned
+        # pinned is a list of all configs for this client (one per bank account).
+        # Refuse only if the statement positively matches a DIFFERENT client.
+        # A non-match (matched is None) trusts the pin and uses the first config.
+        if matched:
+            cfg = next((c for c in pinned if c.account_no == matched), None)
+            if cfg is None:
+                accts = ", ".join(c.account_masked for c in pinned)
+                print(f"    Client : UNROUTED — statement account {matched} ≠ pinned "
+                      f"{pinned[0].client_id} (accounts: {accts})")
+                return {"unrouted": True, "reason": "account mismatch vs pinned --client",
+                        "parsed_account": matched, "fname": fname}
+        else:
+            cfg = pinned[0]
     else:
         cfg = resolve(ext.text, registry)
         if cfg is None:
@@ -336,6 +346,105 @@ def _process_pdf(
 
 
 # ---------------------------------------------------------------------------
+# Core: process one CSV attachment (native bank export — no OCR needed)
+# ---------------------------------------------------------------------------
+
+def _process_csv(
+    csv_path: Path,
+    fname: str,
+    epoch_ms: int,
+    subject: str,
+    period_override: str | None,
+    registry: dict,
+    pinned,
+    dry_run: bool,
+) -> dict:
+    from sage50.bank_parser import parse_csv
+    from core.client_registry import resolve, find_account_in_text
+
+    print(f"    Format : CSV (native bank export — no OCR)", flush=True)
+
+    try:
+        txns = parse_csv(csv_path)
+    except Exception as exc:
+        return {"error": f"CSV parse failed: {exc}"}
+
+    if not txns:
+        return {"error": "zero transactions parsed — check CSV format/headers"}
+
+    bank = txns[0].bank_code
+
+    # Period: override → filename/subject → email-arrival heuristic
+    period = (
+        period_override
+        or _period_from_filename(fname)
+        or _period_from_subject(subject)
+        or _period_from_epoch(epoch_ms)
+    )
+    print(f"    Period : {period}")
+
+    # Routing — use account_no from first transaction if available
+    acct_in_csv = txns[0].account_no if txns else None
+    if pinned is not None:
+        if acct_in_csv:
+            cfg = next((c for c in pinned if c.account_no == acct_in_csv or
+                        acct_in_csv.endswith(c.account_no.lstrip("x"))), None)
+            if cfg is None:
+                cfg = pinned[0]  # trust the pin — CSV may use masked account
+        else:
+            cfg = pinned[0]
+    else:
+        # Try to resolve by matching the raw text of the CSV
+        csv_text = csv_path.read_text(errors="replace")
+        cfg = resolve(csv_text, registry)
+        if cfg is None:
+            print(f"    Client : UNROUTED — no registered client matches this CSV")
+            return {"unrouted": True, "reason": "no client matches CSV account",
+                    "parsed_account": acct_in_csv, "fname": fname}
+
+    print(f"    Client : {cfg.r_folder}  ({cfg.account_masked})")
+    print(f"    Bank   : {bank.value}  |  parsed {len(txns)} transactions  (0 ms OCR)")
+
+    result: dict = {
+        "period": period, "bank": bank.value, "transactions": len(txns),
+        "extract_path": "csv", "extract_ms": 0,
+    }
+
+    if dry_run:
+        print(f"    [dry-run] skipping R:\\, GCS, BookkeepingAgent")
+        result["csv"] = str(csv_path)
+        return result
+
+    # R:\ drop
+    r_dest = _write_to_drop(csv_path, cfg)
+    if r_dest:
+        print(f"    R:\\    : {r_dest}")
+        result["r_dest"] = str(r_dest)
+
+    # GCS upload
+    try:
+        gcs_uri = _upload_to_gcs(csv_path, period)
+        print(f"    GCS    : {gcs_uri}")
+        result["gcs_uri"] = gcs_uri
+    except Exception as exc:
+        print(f"    [warn] GCS upload failed: {exc}")
+
+    # BookkeepingAgent
+    print(f"    Agent  : BookkeepingAgent...", end=" ", flush=True)
+    bk = _run_bookkeeping(csv_path, period, cfg)
+    if "error" in bk:
+        print(f"FAILED — {bk['error']}")
+    else:
+        print(
+            f"OK  total={bk.get('total_transactions', 0)}"
+            f"  auto={bk.get('auto_categorized', 0)}"
+            f"  review={bk.get('needs_review', 0)}"
+        )
+    result["bookkeeping"] = bk
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Core: process one email message
 # ---------------------------------------------------------------------------
 
@@ -350,7 +459,7 @@ def _process_message(
     print(f"\n{'─' * 60}")
     print(f"  From   : {msg['from']}")
     print(f"  Subject: {msg['subject']}")
-    print(f"  PDFs   : {[a['filename'] for a in msg['attachments']]}")
+    print(f"  Files  : {[a['filename'] for a in msg['attachments']]}")
 
     results: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="vtx_") as tmp:
@@ -358,13 +467,19 @@ def _process_message(
         for att in msg["attachments"]:
             print(f"\n  [{att['filename']}]  {att['size']:,} bytes")
             try:
-                pdf_path = notifier.save_attachment(
+                file_path = notifier.save_attachment(
                     msg["msg_id"], att["attachment_id"], att["filename"], tmp_path
                 )
-                result = _process_pdf(
-                    pdf_path, att["filename"], msg["epoch_ms"], msg.get("subject", ""),
-                    period_override, registry, pinned, dry_run,
-                )
+                if att["filename"].lower().endswith(".csv"):
+                    result = _process_csv(
+                        file_path, att["filename"], msg["epoch_ms"],
+                        msg.get("subject", ""), period_override, registry, pinned, dry_run,
+                    )
+                else:
+                    result = _process_pdf(
+                        file_path, att["filename"], msg["epoch_ms"],
+                        msg.get("subject", ""), period_override, registry, pinned, dry_run,
+                    )
                 if "error" in result:
                     print(f"  ERROR: {att['filename']}: {result['error']}")
             except Exception as exc:
@@ -418,16 +533,29 @@ def _quarantine(notifier, msg: dict, unrouted: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 def poll_once(notifier, period_override: str | None, registry: dict, pinned, dry_run: bool) -> int:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     msgs = notifier.poll_for_pdf_attachments()
     if not msgs:
         print("  No unread bank statement emails.")
         return 0
-    print(f"  Found {len(msgs)} message(s) with PDF attachments.")
-    for msg in msgs:
-        try:
-            _process_message(notifier, msg, period_override, registry, pinned, dry_run)
-        except Exception as exc:
-            print(f"  ERROR on {msg.get('msg_id', '?')}: {exc}")
+    print(f"  Found {len(msgs)} message(s) with PDF/CSV attachments.")
+
+    # Process up to 4 messages concurrently. Each message writes to its own
+    # temp dir and BQ stream so there is no shared mutable state.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = {
+            pool.submit(
+                _process_message, notifier, msg, period_override, registry, pinned, dry_run
+            ): msg
+            for msg in msgs
+        }
+        for fut in as_completed(futs):
+            try:
+                fut.result()
+            except Exception as exc:
+                msg = futs[fut]
+                print(f"  ERROR on {msg.get('msg_id', '?')}: {exc}")
     return len(msgs)
 
 
@@ -454,7 +582,8 @@ def run_daemon(
     print("VTX-OS Gmail Watcher")
     print(f"  Registry: {registry_path()}  ({len(registry)} client account(s))")
     if pinned is not None:
-        print(f"  Client  : PINNED {pinned.client_id}  ({pinned.r_folder})")
+        accts = ", ".join(c.account_masked for c in pinned)
+        print(f"  Client  : PINNED {pinned[0].client_id}  ({pinned[0].r_folder})  [{accts}]")
     else:
         print(f"  Client  : auto-route by statement account number")
     print(f"  Period  : {period or 'auto-detect from filename / email date'}")
