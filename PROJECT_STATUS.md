@@ -864,9 +864,26 @@ distinct signature accent: amber/gold** (`gold-500 #D9A21B`, `-600 #B7791F`, `-5
   Clerk tokens, and set `NEXT_PUBLIC_ACUMEN_API_BASE` to the service URL in Vercel.
 - Optional: add a nav link to `/acumen`; Clerk JWT template to log reviewer *email* (not user id).
 
+## SESSION 19 CHANGES  [2026-06-06]
+- **AcumenAI dashboard polish** (orchelix repo): period dropdown (last 24 months) replacing the
+  free-text box; "Approve high-confidence (N)" button that bulk-approves only ≥80%-confidence
+  items to their suggested GL (confirm-guarded, partial-failure-safe), leaving judgment calls.
+- **API deployed + Clerk-wired** (prior session work, now live): `acumenai-api` on Cloud Run
+  (https://acumenai-api-lscziarcxa-pd.a.run.app) validates Clerk JWTs (tender-mayfly-79 instance).
+- **New-client readiness:** confirmed platform is generic/registry-driven; offline suite 19/19 green;
+  all bookkeeper-guide scripts present.
+- **Onboarded theotherapy's 2nd bank account:** appended `36328934733 / GL 1065 / BMO / YE 12`
+  to `R:\bookkeeping\client_accounts.csv` (backed up `.bak`), client_id `theotherapy` (shares the
+  existing `TheotherapyRuleset`). Verified both accounts resolve (1060 + 1065). BOOKKEEPER_GUIDE
+  client table updated.
+- **Ruleset coverage check vs `gl-2024.csv`:** 74% of bank lines auto-categorize; uncovered is
+  mostly correctly-review (bare E-TRANSFER/DEPOSITS, inter-account transfers, reversing JEs).
+  GL-derived rule candidates identified (fuel stations → 5730; incoming INTERAC e-transfers/
+  deposits → revenue 4020 — pending policy confirmation before editing the shared ruleset).
+
 ## NEXT STEPS
-Year-end worksheet generated; investor materials complete; dashboard Phase A shipped; all
-offline tests green. Next priorities:
+Year-end worksheet generated; investor materials complete; dashboard live (API+Clerk); theotherapy
+2nd account onboarded; all offline tests green. Next priorities:
 
 ### Immediate accounting tasks (Concetta 2026-04 year-end)
   1. Open `R:\Concetta Enterprises Inc\Year End\concetta_yearend_2026-04.xlsx`

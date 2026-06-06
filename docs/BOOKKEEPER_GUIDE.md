@@ -611,7 +611,11 @@ As you add more clients, update this table:
 | Client Name | `--client` flag | Year-End |
 |---|---|---|
 | Concetta Enterprises Inc | `concetta` | April (`--period YYYY-04`) |
+| Canadian Federation of theotherapy | `theotherapy` | December (`--period YYYY-12`) |
 | *(new client)* | *(add here)* | |
+
+> **theotherapy** has **two bank accounts** registered (BMO GL `1060` and `1065`) — both
+> route to the same `theotherapy` client and share its categorization ruleset.
 
 ---
 
