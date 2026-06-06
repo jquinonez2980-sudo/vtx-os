@@ -47,10 +47,15 @@ def main() -> int:
         ("E-TRANSFER FEE", Decimal("-1.50"), 5690),
         ("WIRE PAYMENT FEE", Decimal("-15.00"), 5690),
         ("BANK CHARGE", Decimal("-4.00"), 5690),
-        # fuel
+        # fuel (incl. stations added from the FY2024 GL coverage review)
         ("PIONEER", Decimal("-60.00"), 5730),
         ("COSTCO GAS", Decimal("-72.10"), 5730),
         ("CANADIAN TIRE GAS", Decimal("-40.00"), 5730),
+        ("SHELL", Decimal("-58.00"), 5730),
+        ("HUSKY", Decimal("-61.50"), 5730),
+        ("KANATA FUELS", Decimal("-70.00"), 5730),
+        ("KING GEORGE GAS", Decimal("-49.00"), 5730),
+        ("COLBORNE STREE GAS", Decimal("-44.00"), 5730),
         # telecom vs internet
         ("VIRGIN PLUS", Decimal("-55.00"), 5780),
         ("KOODO MOBILE", Decimal("-45.00"), 5780),
@@ -100,6 +105,10 @@ def main() -> int:
     # high-confidence vendor auto-categorizes at 0.80 threshold
     _, _, conf = rs.categorize("PIONEER", Decimal("-60.00"))
     check("vendor confidence >= 80 (auto)", conf >= Decimal("80"))
+
+    # incoming INTERAC e-transfer / deposit auto-books revenue (>= 80)
+    _, _, conf = rs.categorize("INTERAC E-TRANSFER", Decimal("500.00"))
+    check("incoming INTERAC e-transfer auto-books revenue (conf >= 80)", conf >= Decimal("80"))
 
     # registry resolves the client
     check("get_ruleset('theotherapy') -> TheotherapyRuleset",

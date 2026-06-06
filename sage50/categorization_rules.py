@@ -265,8 +265,13 @@ class TheotherapyRuleset:
 
     # -- 5730 Motor Vehicle Expenses (fuel) -------------------------------
     def _rule_gas(self, desc, amount):
+        # Fuel stations from FY2024 GL (all coded to 5730). Added SHELL/HUSKY/
+        # KANATA FUEL/KING GEORGE GAS/COLBORNE STREE + common brands the prior
+        # list missed. (MOBIL is intentionally NOT here — FY2024 coded it to 5780.)
         for kw in ("PIONEER", "COSTCO GAS", "COTSCO GAS", "CANADIAN TIRE GAS",
-                   "ESSO", "PETRO", "COLBORNE GAS", "ECHO PLACE CARW", "CARWASH"):
+                   "ESSO", "PETRO", "COLBORNE GAS", "COLBORNE STREE", "ECHO PLACE CARW",
+                   "CARWASH", "SHELL", "HUSKY", "KANATA FUEL", "KING GEORGE GAS",
+                   "ULTRAMAR", "FAS GAS"):
             if kw in desc:
                 return (5730, "Motor Vehicle Expenses", Decimal("95"))
         return None
