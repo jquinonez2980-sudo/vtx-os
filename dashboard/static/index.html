@@ -940,28 +940,34 @@ async function fetchLiveData() {
       const pending = approvals.length;
       document.getElementById('kpi-pending').textContent = pending;
       document.getElementById('sb-pending-badge').textContent = pending;
-      if (approvals.length > 0) {
-        ENTRIES.length = 0;
-        approvals.slice(0, 30).forEach((a, i) => {
-          const amt = parseFloat(a.amount || 0);
-          ENTRIES.push({
-            id: a.queue_id || (i + 1),
-            date: a.txn_date ? String(a.txn_date).slice(5, 10) : '—',
-            desc: a.description || 'Transaction',
-            client: a.client_id || 'Unknown',
-            debit:  amt > 0 ? amt : 0,
-            credit: amt < 0 ? Math.abs(amt) : 0,
-            cat:    a.gl_account_no || '9999',
-            conf:   Math.round((parseFloat(a.confidence || 0)) * 100),
-            status: 'pending',
-            queue_id: a.queue_id,
-          });
+      ENTRIES.length = 0;
+      approvals.slice(0, 30).forEach((a, i) => {
+        const amt = parseFloat(a.amount || 0);
+        ENTRIES.push({
+          id: a.queue_id || (i + 1),
+          date: a.txn_date ? String(a.txn_date).slice(5, 10) : '—',
+          desc: a.description || 'Transaction',
+          client: a.client_id || 'Unknown',
+          debit:  amt > 0 ? amt : 0,
+          credit: amt < 0 ? Math.abs(amt) : 0,
+          cat:    a.gl_account_no || '9999',
+          conf:   Math.round((parseFloat(a.confidence || 0)) * 100),
+          status: 'pending',
+          queue_id: a.queue_id,
         });
-        renderEntriesTable();
-        renderDashEntries();
-      }
+      });
+      renderEntriesTable();
+      renderDashEntries();
     }
-  } catch (_) { /* stay in demo mode */ }
+  } catch (err) {
+    const msg = String(err.message || err);
+    if (msg.includes('401') || msg.includes('403')) {
+      showToast('Auth failed — token rejected by server (401)', 'warning');
+      setToken(null);
+      updateModeBanner();
+    }
+    // else: network/BQ error — keep demo data silently
+  }
 
   // Load audit feed
   try {

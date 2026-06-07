@@ -55,7 +55,13 @@ def _decode(token: str) -> dict[str, Any]:
 
 
 def require_user(request: Request) -> dict[str, Any]:
-    """FastAPI dependency — validate the bearer token or raise 401."""
+    """FastAPI dependency — validate the bearer token or raise 401.
+
+    Dev bypass: when AUTH_JWKS_URL is not configured, any non-empty Bearer token
+    is accepted and the sub/email are taken from a simple base64-decoded payload
+    (no signature check). This lets the dashboard work locally without a Clerk/Auth0
+    setup. Never deploy to production without AUTH_JWKS_URL set.
+    """
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(
@@ -64,6 +70,21 @@ def require_user(request: Request) -> dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = header[len("Bearer "):].strip()
+
+    # ── Dev bypass (no JWKS configured) ──────────────────────────────────────
+    if not AUTH_JWKS_URL:
+        # Accept any non-empty token; try to peek at the payload for a nice email.
+        import base64, json as _json
+        claims: dict[str, Any] = {"sub": "dev", "email": "dev@local"}
+        try:
+            parts = token.split(".")
+            if len(parts) >= 2:
+                padded = parts[1] + "=" * (-len(parts[1]) % 4)
+                claims = _json.loads(base64.urlsafe_b64decode(padded))
+        except Exception:
+            pass
+        return claims
+    # ── Production JWKS validation ────────────────────────────────────────────
     try:
         return _decode(token)
     except HTTPException:
