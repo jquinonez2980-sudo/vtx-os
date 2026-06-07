@@ -22,13 +22,18 @@ threadpool (BigQuery calls are blocking I/O) and the event loop never stalls.
 from __future__ import annotations
 
 import os
+import pathlib
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from dashboard.auth import require_user, reviewer_email
+
+_STATIC = pathlib.Path(__file__).parent / "static"
 
 _CORS_ORIGINS = [
     o.strip()
@@ -53,6 +58,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AcumenAI Dashboard API", version="1.0", lifespan=lifespan)
+
+app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def root() -> FileResponse:
+    return FileResponse(_STATIC / "index.html")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -181,3 +194,158 @@ def live_approval_action(
         raise HTTPException(status_code=400, detail=f"unknown action '{action}'")
 
     return {"ok": bool(ok), "queue_id": queue_id, "action": action, "reviewer": email}
+
+
+# --------------------------------------------------------------------------- #
+# Live ops — unposted queue
+# --------------------------------------------------------------------------- #
+
+@app.get("/api/live/unposted")
+def live_unposted(
+    client: str | None = None,
+    limit: int = 200,
+    _user: dict = Depends(require_user),
+) -> list[dict[str, Any]]:
+    from dashboard.queries import unposted
+    return unposted(client, limit)
+
+
+# --------------------------------------------------------------------------- #
+# Ops — invoke backend scripts (auth required)
+# --------------------------------------------------------------------------- #
+
+@app.post("/api/ops/run-watcher")
+def ops_run_watcher(
+    client: str | None = None,
+    period: str | None = None,
+    dry_run: bool = True,
+    _user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Run gmail_watcher.py --once in a subprocess; returns stdout/stderr lines."""
+    import subprocess
+    import sys
+    _ROOT = pathlib.Path(__file__).parent.parent
+    args = [sys.executable, str(_ROOT / "scripts" / "gmail_watcher.py"), "--once"]
+    if dry_run:
+        args.append("--dry-run")
+    if client:
+        args += ["--client", client]
+    if period:
+        args += ["--period", period]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=300,
+            cwd=str(_ROOT), env={**os.environ, "PYTHONUTF8": "1"},
+        )
+        lines = [l for l in (result.stdout + "\n" + result.stderr).splitlines() if l.strip()]
+        return {"ok": result.returncode == 0, "lines": lines, "code": result.returncode}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "lines": ["ERROR: Watcher timed out after 300s"], "code": -1}
+    except Exception as exc:
+        return {"ok": False, "lines": [f"ERROR: {exc}"], "code": -1}
+
+
+@app.post("/api/ops/post-entries")
+def ops_post_entries(
+    client_id: str | None = None,
+    account_no: str | None = None,
+    gl_bank: str | None = None,
+    _user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Dry-run _post_je.py for the given client. Always dry-run — real posting requires local Sage 50 SAI access."""
+    import subprocess
+    import sys
+    _ROOT = pathlib.Path(__file__).parent.parent
+    # Resolve account_no + gl_bank from registry when not supplied directly
+    if (not account_no or not gl_bank) and client_id:
+        try:
+            from core.client_registry import load_registry
+            reg = load_registry()
+            configs = list(reg.values()) if isinstance(reg, dict) else list(reg)
+            cfg = next(
+                (c for c in configs if getattr(c, "client_id", None) == client_id), None
+            )
+            if cfg:
+                account_no = account_no or getattr(cfg, "account_masked", None) or getattr(cfg, "account_no", None)
+                gl_bank = gl_bank or str(getattr(cfg, "gl_bank_account", "") or "")
+        except Exception:
+            pass
+    if not account_no:
+        raise HTTPException(status_code=422, detail="account_no required (or supply client_id to look up from registry)")
+    if not gl_bank:
+        raise HTTPException(status_code=422, detail="gl_bank required (or supply client_id to look up from registry)")
+    args = [
+        sys.executable, str(_ROOT / "scripts" / "_post_je.py"),
+        "--account", account_no,
+        "--gl-bank", gl_bank,
+    ]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=300,
+            cwd=str(_ROOT), env={**os.environ, "PYTHONUTF8": "1"},
+        )
+        lines = [l for l in (result.stdout + "\n" + result.stderr).splitlines() if l.strip()]
+        return {
+            "ok": result.returncode == 0,
+            "dry_run": True,
+            "note": "Re-run with --commit (and Sage 50 CLOSED) to post for real.",
+            "lines": lines,
+            "code": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "dry_run": True, "lines": ["ERROR: Post job timed out after 300s"], "code": -1}
+    except Exception as exc:
+        return {"ok": False, "dry_run": True, "lines": [f"ERROR: {exc}"], "code": -1}
+
+
+@app.post("/api/ops/archive-client/{client_id}")
+def ops_archive_client(
+    client_id: str,
+    _user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Mark all BQ approval_queue rows for a client as ARCHIVED (removes from active queues)."""
+    from google.cloud import bigquery as _bqmod
+    from core.bq_loader import PROJECT, _bq
+    bq = _bq()
+    sql = f"""
+        UPDATE `{PROJECT}.vtx_accounting.approval_queue`
+        SET status = 'ARCHIVED'
+        WHERE client_id = @client_id
+          AND status != 'ARCHIVED'
+    """
+    job = bq.query(sql, job_config=_bqmod.QueryJobConfig(
+        query_parameters=[_bqmod.ScalarQueryParameter("client_id", "STRING", client_id)]
+    ))
+    job.result()
+    return {"ok": True, "client_id": client_id, "rows_archived": job.num_dml_affected_rows}
+
+
+@app.post("/api/ops/onboard-client")
+def ops_onboard_client(
+    company_name: str,
+    client_id: str,
+    account_no: str,
+    bank: str,
+    gl_bank_account: str,
+    sender_email: str = "",
+    year_end_month: int = 12,
+    _user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Append a new client row to R:\\bookkeeping\\client_accounts.csv."""
+    registry_path = pathlib.Path(r"R:\bookkeeping\client_accounts.csv")
+    if not registry_path.parent.exists():
+        row_csv = f"{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email},{year_end_month}"
+        return {
+            "ok": False,
+            "manual": True,
+            "error": "Registry path not accessible from this server.",
+            "row": row_csv,
+            "hint": f"Add this line to R:\\bookkeeping\\client_accounts.csv: {row_csv}",
+        }
+    existing = registry_path.read_text(encoding="utf-8") if registry_path.exists() else ""
+    if f",{client_id}," in existing:
+        raise HTTPException(status_code=409, detail=f"client_id '{client_id}' already exists in registry")
+    row = f"\n{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email},{year_end_month}"
+    with open(registry_path, "a", encoding="utf-8") as fh:
+        fh.write(row)
+    return {"ok": True, "client_id": client_id, "message": f"Client '{company_name}' added to registry"}

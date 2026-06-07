@@ -1,0 +1,1806 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AcumenAI — Orchelix Accounting OS</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/acumen.css">
+  <style>
+    .dropdown {
+      position: fixed; background: #fff; border: 1px solid var(--card-border);
+      border-radius: 10px; box-shadow: 0 8px 32px rgba(10,37,64,0.12);
+      z-index: 50; min-width: 260px; display: none; overflow: hidden;
+    }
+    .dropdown.open { display: block; }
+    .dd-search {
+      padding: 10px; border-bottom: 1px solid var(--card-border);
+    }
+    .dd-search input {
+      width: 100%; padding: 7px 10px; border: 1px solid var(--card-border);
+      border-radius: 7px; font: 400 13px/1 'Inter', sans-serif;
+      color: var(--t1); outline: none; background: var(--page-bg);
+    }
+    .dd-search input:focus { border-color: var(--teal); }
+    .dd-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; cursor: pointer;
+      transition: background 140ms; font: 400 13px/1.3 'Inter', sans-serif;
+    }
+    .dd-item:hover { background: var(--page-bg); }
+    .dd-item.active { background: var(--teal-soft); }
+    .dd-item .di-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dd-item .di-name { font-weight: 500; color: var(--t1); }
+    .dd-item .di-industry { font-size: 11px; color: var(--t3); margin-top: 2px; }
+    .onboarding-stage {
+      display: flex; align-items: center; gap: 6px;
+      padding: 16px 20px; border-bottom: 1px solid var(--card-border);
+    }
+    .stage-step {
+      display: flex; align-items: center; gap: 6px;
+      font: 500 12px/1 'Inter', sans-serif;
+    }
+    .stage-dot {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font: 600 10px/1 'Inter', sans-serif;
+      flex-shrink: 0;
+    }
+    .stage-dot.done { background: var(--green-bg); color: var(--green); border: 1.5px solid var(--green-bd); }
+    .stage-dot.active { background: var(--navy); color: #fff; }
+    .stage-dot.pending { background: var(--page-bg); color: var(--t4); border: 1.5px solid var(--card-border); }
+    .stage-line { flex: 1; height: 1px; background: var(--card-border); min-width: 12px; }
+    .stage-label { color: var(--t2); }
+    .stage-label.active { color: var(--t1); font-weight: 600; }
+    .stage-label.done { color: var(--green); }
+    .empty-state {
+      padding: 40px 20px; text-align: center;
+      color: var(--t3); font: 400 13px/1.6 'Inter', sans-serif;
+    }
+    .empty-state svg { width: 36px; height: 36px; margin: 0 auto 12px; display: block; opacity: 0.35; }
+    .sage-status-card {
+      display: flex; align-items: center; gap: 16px;
+      padding: 20px; border: 1px solid var(--card-border);
+      border-radius: 12px; background: var(--card);
+    }
+    .sage-icon {
+      width: 48px; height: 48px; border-radius: 12px;
+      background: linear-gradient(135deg, #1B355A 0%, #0A2540 100%);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .sage-icon svg { width: 24px; height: 24px; color: #fff; }
+    #watcher-log-wrap { display: none; }
+    #watcher-log-wrap.visible { display: block; }
+    .client-row {
+      display: grid; grid-template-columns: 2fr 1.5fr 1fr 1fr 1fr auto;
+      align-items: center; gap: 14px;
+      padding: 14px 20px; border-bottom: 1px solid var(--card-border);
+      font: 400 13px/1 'Inter', sans-serif;
+    }
+    .client-row:last-child { border-bottom: 0; }
+    .client-row:hover { background: #F8F9FB; }
+    .client-row .cr-name { font-weight: 500; color: var(--t1); }
+    .client-row .cr-sub { font-size: 11px; color: var(--t3); margin-top: 3px; }
+    .hst-toggle {
+      display: inline-flex; background: var(--page-bg);
+      border: 1px solid var(--card-border); border-radius: 8px;
+      overflow: hidden;
+    }
+    .hst-toggle button {
+      font: 500 12px/1 'Inter', sans-serif; color: var(--t2);
+      padding: 7px 14px; border: none; background: none; cursor: pointer;
+      transition: all 160ms var(--ease);
+    }
+    .hst-toggle button.active { background: var(--card); color: var(--t1); box-shadow: 0 1px 3px rgba(10,37,64,0.08); }
+    /* sign-in overlay */
+    .signin-overlay {
+      position: fixed; inset: 0; background: rgba(10,37,64,0.6);
+      backdrop-filter: blur(6px); z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .signin-overlay.hidden { display: none; }
+    .signin-card {
+      background: #fff; border-radius: 20px; padding: 44px 40px;
+      width: 100%; max-width: 400px;
+      box-shadow: 0 32px 96px rgba(10,37,64,0.22);
+    }
+    .signin-mark {
+      width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 22px;
+      background: linear-gradient(135deg,#1B355A 0%,#0A2540 100%);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .signin-mark::after {
+      content:''; width:18px; height:18px; border-radius:4px;
+      background: var(--gold-500,#D9A21B); transform:rotate(45deg);
+    }
+    .signin-title { font:700 24px/1 'Montserrat',sans-serif; color:var(--t1); text-align:center; }
+    .signin-sub   { font:500 13px/1.5 'Montserrat',sans-serif; color:var(--t3); text-align:center; margin-top:6px; }
+    /* post-preview */
+    #post-preview-log { display: none; }
+    #post-preview-log.visible { display: block; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════ SIGN-IN OVERLAY -->
+<div class="signin-overlay hidden" id="signin-overlay">
+  <div class="signin-card">
+    <div class="signin-mark"></div>
+    <div class="signin-title">AcumenAI</div>
+    <div class="signin-sub">by Orchelix · Accounting OS</div>
+    <div style="margin-top:28px">
+      <label class="field-label">Bearer Token</label>
+      <input class="input" type="password" id="signin-token-input"
+             placeholder="eyJhbGciOi…"
+             style="font-family:'JetBrains Mono',monospace;font-size:12px;margin-top:6px"
+             onkeydown="if(event.key==='Enter')signIn()">
+      <div class="field-hint">Paste your API token to connect live BigQuery data</div>
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:16px" onclick="signIn()">
+      Connect Live Data →
+    </button>
+    <button class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:8px;color:var(--t3)" onclick="continueDemo()">
+      Continue in Demo Mode
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════ SIDEBAR -->
+<aside class="sidebar" id="sidebar">
+  <div class="sb-brand">
+    <div class="mark"></div>
+    <div class="titles">
+      <div class="title-main">AcumenAI</div>
+      <div class="title-sub">Orchelix · Accounting OS</div>
+    </div>
+  </div>
+
+  <nav class="sb-nav" role="navigation">
+    <div class="sb-item active" data-view="dashboard" onclick="switchView('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </div>
+    <div class="sb-item" data-view="onboarding" onclick="openOnboarding()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+      Onboard Client
+    </div>
+    <div class="sb-item" data-view="watcher" onclick="switchView('watcher')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      Gmail Watcher
+    </div>
+    <div class="sb-item" data-view="entries" onclick="switchView('entries')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+      Review Entries
+      <span class="badge" id="sb-pending-badge">47</span>
+    </div>
+    <div class="sb-item" data-view="hst" onclick="switchView('hst')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+      HST Tracker
+    </div>
+    <div class="sb-item" data-view="sage" onclick="switchView('sage')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      Sage 50 Posting
+    </div>
+
+    <div class="sb-divider"></div>
+    <div class="sb-section-label">Manage</div>
+
+    <div class="sb-item" data-view="clients" onclick="switchView('clients')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+      Clients
+    </div>
+    <div class="sb-item" data-view="reports" onclick="switchView('reports')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Reports
+    </div>
+    <div class="sb-item" data-view="settings" onclick="switchView('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </div>
+  </nav>
+
+  <div class="sb-footer">
+    <div class="sb-user">
+      <div class="avatar">JK</div>
+      <div class="info">
+        <div class="name">Jordan Kim</div>
+        <div class="role">Senior Bookkeeper</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════════════════════════════════ HEADER -->
+<header class="header">
+  <span class="page-title" id="page-title">Dashboard</span>
+
+  <div class="client-selector" id="client-btn" onclick="toggleClientDropdown(event)">
+    <span class="cs-dot"></span>
+    <span class="cs-name" id="cs-name">Maple Ridge Interiors Inc.</span>
+    <span class="cs-caret">▾</span>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div id="mode-banner" class="demo" onclick="switchView('settings')" title="Click to configure API token">◎ Demo mode</div>
+
+  <button class="icon-btn" title="Notifications" onclick="showToast('3 new bank statements detected for Summit Stone Group', 'info')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+    <span class="notif-dot"></span>
+  </button>
+
+  <button class="icon-btn" title="Help">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+  </button>
+
+  <div class="h-avatar" title="Jordan Kim">JK</div>
+</header>
+
+<!-- ══════════════════════════════════════ CLIENT DROPDOWN -->
+<div class="dropdown" id="client-dropdown">
+  <div class="dd-search">
+    <input type="text" id="client-search" placeholder="Search clients…" oninput="filterClients(this.value)">
+  </div>
+  <div id="client-list"></div>
+</div>
+
+<!-- ══════════════════════════════════════ CONTENT -->
+<div class="content-wrap">
+
+  <!-- ── DASHBOARD ── -->
+  <div class="view active" id="view-dashboard">
+
+    <!-- KPIs -->
+    <div class="kpi-row">
+      <div class="kpi" style="--kpi-color:#14B8A6;--kpi-soft:#E6FAF7">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <div class="kpi-val" id="kpi-clients">12</div>
+        <div class="kpi-label">Active Clients</div>
+        <span class="kpi-delta up">↑ 2 this month</span>
+      </div>
+      <div class="kpi" style="--kpi-color:#D9A21B;--kpi-soft:#FBF3DD">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
+        <div class="kpi-val" id="kpi-pending">47</div>
+        <div class="kpi-label">Pending Approvals</div>
+        <span class="kpi-delta warn">⚠ Needs review</span>
+
+      </div>
+      <div class="kpi" style="--kpi-color:#2563EB;--kpi-soft:#EFF6FF">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+        <div class="kpi-val">8</div>
+        <div class="kpi-label">Statements Awaiting</div>
+        <span class="kpi-delta neutral">3 banks</span>
+      </div>
+      <div class="kpi" style="--kpi-color:#D9A21B;--kpi-soft:#FBF3DD">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <div class="kpi-val" id="kpi-hst">$24.6K</div>
+        <div class="kpi-label">HST Owing (Total)</div>
+        <span class="kpi-delta warn">Due Jun 30</span>
+      </div>
+      <div class="kpi" style="--kpi-color:#0F9A6C;--kpi-soft:#EAFAF4">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+        <div class="kpi-val">✓</div>
+        <div class="kpi-label">Sage 50 Sync</div>
+        <span class="kpi-delta good">2h ago</span>
+      </div>
+    </div>
+
+    <!-- Client stats + Activity -->
+    <div class="two-col" style="margin-bottom:20px">
+      <div class="card">
+        <div class="client-quick">
+          <div class="cq-logo" id="cq-logo">MR</div>
+          <div>
+            <div class="cq-name" id="cq-name">Maple Ridge Interiors Inc.</div>
+            <div class="cq-meta" id="cq-meta">Interior Design · RBC-7823 · Active since Jan 2026</div>
+          </div>
+          <div style="margin-left:auto">
+            <span class="badge badge-green badge-dot">Active</span>
+          </div>
+        </div>
+
+        <div class="onboarding-stage" id="onboarding-stage">
+          <div class="stage-step"><div class="stage-dot done">✓</div></div>
+          <div class="stage-line"></div>
+          <span class="stage-label done" style="font-size:11px">Onboard</span>
+          <div class="stage-line"></div>
+          <div class="stage-step"><div class="stage-dot done">✓</div></div>
+          <div class="stage-line"></div>
+          <span class="stage-label done" style="font-size:11px">Gmail</span>
+          <div class="stage-line"></div>
+          <div class="stage-step"><div class="stage-dot active">3</div></div>
+          <div class="stage-line"></div>
+          <span class="stage-label active" style="font-size:11px">Review</span>
+          <div class="stage-line"></div>
+          <div class="stage-step"><div class="stage-dot pending">4</div></div>
+          <div class="stage-line"></div>
+          <span class="stage-label" style="font-size:11px">Post</span>
+          <div class="stage-line"></div>
+          <div class="stage-step"><div class="stage-dot pending">5</div></div>
+          <div class="stage-line"></div>
+          <span class="stage-label" style="font-size:11px">HST</span>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-cell">
+            <div class="sc-k">Unreconciled</div>
+            <div class="sc-v warn" id="cq-unrec">23</div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-k">HST Balance</div>
+            <div class="sc-v" id="cq-hst">$4,210</div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-k">Last Reconciled</div>
+            <div class="sc-v" style="font-size:14px" id="cq-recon">May 31, 2026</div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-k">Year End</div>
+            <div class="sc-v" style="font-size:14px">December</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="ch-title">Activity Feed</div>
+            <div class="ch-sub">Latest across all clients</div>
+          </div>
+        </div>
+        <div class="act-list" id="activity-feed"></div>
+      </div>
+    </div>
+
+    <!-- Gmail Watcher preview -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-head">
+        <div>
+          <div class="ch-title">Gmail Watcher</div>
+          <div class="ch-sub" id="cq-client-watcher">Maple Ridge Interiors Inc. · RBC / TD / Amex</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="switchView('watcher')">Configure</button>
+          <button class="btn btn-teal btn-sm" onclick="quickRunWatcher()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Run Now
+          </button>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Bank</th><th>File / Subject</th><th>Statements</th><th>Status</th>
+          </tr></thead>
+          <tbody id="watcher-preview"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Pending Entries preview -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="ch-title">Pending Journal Entries</div>
+          <div class="ch-sub">BigQuery · awaiting approval</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="month-picker" id="dash-month-picker">
+            <button onclick="changeMonth(-1)">‹</button>
+            <span id="dash-month-label">June 2026</span>
+            <button onclick="changeMonth(1)">›</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="switchView('entries')" style="color:var(--teal)">View all →</button>
+        </div>
+      </div>
+      <div id="dash-entries-toolbar" style="padding:10px 14px;background:var(--page-bg);border-bottom:1px solid var(--card-border);display:flex;gap:8px;align-items:center">
+        <input type="checkbox" id="dash-select-all" onchange="toggleAllDash(this)">
+        <span id="dash-sel-count" style="font:400 12px/1 'Inter',sans-serif;color:var(--t3);flex:1">0 selected</span>
+        <button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd)" id="dash-approve-btn" onclick="approveDash()" disabled>✓ Approve</button>
+        <button class="btn btn-danger btn-sm" id="dash-reject-btn" onclick="rejectDash()" disabled>✕ Reject</button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:32px"></th>
+            <th>Date</th><th>Description</th><th>Client</th><th>Amount</th><th>Category</th><th>Confidence</th><th>Status</th>
+          </tr></thead>
+          <tbody id="dash-entries-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /dashboard -->
+
+  <!-- ── GMAIL WATCHER ── -->
+  <div class="view" id="view-watcher">
+    <div class="view-header">
+      <div class="vh-left">
+        <div class="vh-title">Gmail Watcher</div>
+        <div class="vh-sub">Configure and run the bank statement detector for your clients</div>
+      </div>
+      <div class="vh-actions">
+        <select class="select-ctrl" style="width:220px" id="watcher-client-select" onchange="updateWatcherClient()">
+          <option value="all">All Active Clients</option>
+        </select>
+        <button class="btn btn-secondary" onclick="loadFromFolder()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          Load from Folder
+        </button>
+        <button class="btn btn-teal" id="run-watcher-btn" onclick="runWatcher()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run Gmail Watcher
+        </button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <div><div class="ch-title">Bank Configuration</div><div class="ch-sub">Select which banks to scan for statements</div></div>
+      </div>
+      <div class="bank-chips" id="bank-chips">
+        <div class="bank-chip selected" onclick="toggleBank(this)">RBC</div>
+        <div class="bank-chip selected" onclick="toggleBank(this)">TD Bank</div>
+        <div class="bank-chip selected" onclick="toggleBank(this)">American Express</div>
+        <div class="bank-chip" onclick="toggleBank(this)">BMO</div>
+        <div class="bank-chip" onclick="toggleBank(this)">Scotiabank</div>
+        <div class="bank-chip" onclick="toggleBank(this)">CIBC</div>
+        <div class="bank-chip" onclick="toggleBank(this)">National Bank</div>
+        <div class="bank-chip" onclick="toggleBank(this)">Desjardins</div>
+      </div>
+      <div style="padding:14px 20px;display:flex;gap:14px">
+        <div style="flex:1">
+          <label class="field-label">Gmail Label / Folder</label>
+          <input class="input" type="text" placeholder="e.g. Bank Statements / Finance / Inbox" value="Finance/Bank Statements">
+        </div>
+        <div style="flex:1">
+          <label class="field-label">Lookback Period</label>
+          <select class="select-ctrl">
+            <option>Current month</option>
+            <option>Last 30 days</option>
+            <option selected>Last 60 days</option>
+            <option>Last 90 days</option>
+          </select>
+        </div>
+        <div style="flex:1">
+          <label class="field-label">Statement Format</label>
+          <select class="select-ctrl">
+            <option selected>PDF Attachments + HTML</option>
+            <option>PDF only</option>
+            <option>CSV exports</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div><div class="ch-title">Detection Log</div><div class="ch-sub" id="watcher-run-status">Not yet run — press Run Gmail Watcher to start</div></div>
+        <div id="watcher-progress-badge"></div>
+      </div>
+
+      <div id="watcher-log-wrap">
+        <div class="progress-log" id="watcher-log"></div>
+      </div>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Detected</th><th>Client</th><th>Bank</th><th>Subject / File</th><th>Stmts Found</th><th>Entries Generated</th><th>Status</th></tr></thead>
+          <tbody id="watcher-full-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /watcher -->
+
+  <!-- ── REVIEW ENTRIES ── -->
+  <div class="view" id="view-entries">
+    <div class="view-header">
+      <div class="vh-left">
+        <div class="vh-title">Review Journal Entries</div>
+        <div class="vh-sub">BigQuery AI-generated entries awaiting approval</div>
+      </div>
+      <div class="vh-actions">
+        <div class="month-picker">
+          <button onclick="changeMonth(-1)">‹</button>
+          <span id="entries-month-label">June 2026</span>
+          <button onclick="changeMonth(1)">›</button>
+        </div>
+        <select class="select-ctrl" style="width:200px" onchange="filterEntriesByClient(this.value)" id="entries-client-filter">
+          <option value="all">All Clients</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="padding:10px 14px;background:var(--page-bg);border-bottom:1px solid var(--card-border);display:flex;gap:8px;align-items:center">
+        <input type="checkbox" id="all-select" onchange="toggleAllEntries(this)">
+        <span id="entries-sel-count" style="font:400 12px/1 'Inter',sans-serif;color:var(--t3);flex:1">0 of 12 selected</span>
+        <button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd)" id="approve-btn" onclick="approveSelected()" disabled>✓ Approve Selected</button>
+        <button class="btn btn-danger btn-sm" id="reject-btn" onclick="rejectSelected()" disabled>✕ Reject</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportEntries()">↓ Export CSV</button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:32px"></th>
+            <th>Date</th><th>Description</th><th>Client</th><th>Debit</th><th>Credit</th><th>Category</th><th>Confidence</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody id="entries-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /entries -->
+
+  <!-- ── HST TRACKER ── -->
+  <div class="view" id="view-hst">
+    <div class="view-header">
+      <div class="vh-left">
+        <div class="vh-title">HST / Tax Tracker</div>
+        <div class="vh-sub">GST/HST tracking and remittance overview — Ontario</div>
+      </div>
+      <div class="vh-actions">
+        <div class="hst-toggle">
+          <button class="active" onclick="setHSTMode('bank',this)">Bank Statements</button>
+          <button onclick="setHSTMode('invoices',this)">Invoices (Drop Folder)</button>
+        </div>
+        <div class="month-picker">
+          <button onclick="changeMonth(-1)">‹</button>
+          <span id="hst-month-label">June 2026</span>
+          <button onclick="changeMonth(1)">›</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="three-col">
+      <div class="kpi" style="--kpi-color:#0F9A6C;--kpi-soft:#EAFAF4">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
+        <div class="kpi-val">$12,430</div>
+        <div class="kpi-label">HST Collected (Jun)</div>
+        <span class="kpi-delta good">↑ 8% vs May</span>
+      </div>
+      <div class="kpi" style="--kpi-color:#C8393B;--kpi-soft:#FEF2F2">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <div class="kpi-val">$9,200</div>
+        <div class="kpi-label">Remittable (Net)</div>
+        <span class="kpi-delta warn">Due Jun 30</span>
+      </div>
+      <div class="kpi" style="--kpi-color:#2563EB;--kpi-soft:#EFF6FF">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+        <div class="kpi-val">14 days</div>
+        <div class="kpi-label">Until Filing Deadline</div>
+        <span class="kpi-delta warn">Jun 30, 2026</span>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-head">
+          <div><div class="ch-title">HST Trend</div><div class="ch-sub">Collected vs Remittable — last 6 months</div></div>
+          <div class="chart-legend">
+            <span style="display:flex;align-items:center;gap:5px"><span style="background:#14B8A6;width:10px;height:10px;border-radius:2px;display:inline-block"></span>Collected</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="background:#0A2540;width:10px;height:10px;border-radius:2px;display:inline-block"></span>Remittable</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <svg id="hst-chart" viewBox="0 0 460 180" width="100%" style="display:block"></svg>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="ch-title">By Client — June</div></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Client</th><th>Collected</th><th>Owing</th><th>Status</th></tr></thead>
+            <tbody id="hst-by-client"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div><!-- /hst -->
+
+  <!-- ── SAGE POSTING ── -->
+  <div class="view" id="view-sage">
+    <div class="view-header">
+      <div class="vh-left">
+        <div class="vh-title">Sage 50 Posting</div>
+        <div class="vh-sub">Send approved journal entries to Sage 50 via the Posting Agent</div>
+      </div>
+      <div class="vh-actions">
+        <span class="badge badge-green badge-dot">Sage 50 Connected</span>
+        <span style="font:400 12px/1 'Inter',sans-serif;color:var(--t3)">Last sync: 2h ago</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-body">
+        <div class="sage-status-card">
+          <div class="sage-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </div>
+          <div style="flex:1">
+            <div style="font:600 15px/1 'Inter',sans-serif;color:var(--t1);margin-bottom:5px">Posting Agent</div>
+            <div style="font:400 13px/1.4 'Inter',sans-serif;color:var(--t2)" id="sage-unposted-desc">Sign in to see approved entries ready to post.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+            <div style="display:flex;gap:8px;align-items:center">
+              <input class="input" type="text" id="sage-account-no" placeholder="Account e.g. xxxx5443" style="width:160px;font-size:12px;font-family:'JetBrains Mono',monospace">
+              <input class="input" type="text" id="sage-gl-bank" placeholder="GL e.g. 1060" style="width:100px;font-size:12px;font-family:'JetBrains Mono',monospace">
+            </div>
+            <button class="btn btn-primary" onclick="postToSage()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Preview Posting (Dry Run)
+            </button>
+            <span style="font:400 11px/1 'Inter',sans-serif;color:var(--t3)"><span id="sage-unposted-count">—</span> approved entries</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dry-run preview log (shown after clicking Preview Posting) -->
+    <div class="card" id="post-preview-log" style="margin-bottom:16px">
+      <div class="card-head">
+        <div><div class="ch-title">Posting Preview (Dry Run)</div><div class="ch-sub">No data written — re-run with --commit locally when Sage 50 is CLOSED</div></div>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('post-preview-log').classList.remove('visible')">✕ Close</button>
+      </div>
+      <div class="progress-log" id="post-preview-lines" style="max-height:220px;overflow-y:auto"></div>
+    </div>
+
+    <!-- Approved entries awaiting Sage 50 (live data) -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <div><div class="ch-title">Approved — Awaiting Sage 50</div><div class="ch-sub">BigQuery · status APPROVED · ready to post</div></div>
+        <button class="btn btn-ghost btn-sm" onclick="loadUnposted()">↻ Refresh</button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Description</th><th>Client</th><th>Debit</th><th>Credit</th><th>GL</th><th>Status</th></tr></thead>
+          <tbody id="unposted-entries-tbody">
+            <tr><td colspan="7" style="text-align:center;padding:32px;color:var(--t3);font-size:13px">Sign in with a token to see live approved entries</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="ch-title">Recent Post History</div></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Posted</th><th>Client</th><th>Period</th><th>Entries</th><th>Total Debit</th><th>Status</th><th>By</th></tr></thead>
+          <tbody id="sage-history"></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /sage -->
+
+  <!-- ── CLIENTS ── -->
+  <div class="view" id="view-clients">
+    <div class="view-header">
+      <div class="vh-left">
+        <div class="vh-title">Clients</div>
+        <div class="vh-sub" id="clients-count-sub">12 active clients · 1 onboarding</div>
+      </div>
+      <div class="vh-actions">
+        <input class="input" style="width:220px" type="text" placeholder="Search clients…" oninput="searchClients(this.value)">
+        <button class="btn btn-primary" onclick="openOnboarding()">+ Onboard Client</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="padding:10px 20px;background:var(--page-bg);border-bottom:1px solid var(--card-border);display:grid;grid-template-columns:2fr 1.5fr 1fr 1fr 1fr auto;gap:14px">
+        <span style="font:500 11px/1 'Inter',sans-serif;letter-spacing:0.05em;text-transform:uppercase;color:var(--t3)">Client</span>
+        <span style="font:500 11px/1 'Inter',sans-serif;letter-spacing:0.05em;text-transform:uppercase;color:var(--t3)">Industry</span>
+        <span style="font:500 11px/1 'Inter',sans-serif;letter-spacing:0.05em;text-transform:uppercase;color:var(--t3)">Unrec.</span>
+        <span style="font:500 11px/1 'Inter',sans-serif;letter-spacing:0.05em;text-transform:uppercase;color:var(--t3)">HST Owing</span>
+        <span style="font:500 11px/1 'Inter',sans-serif;letter-spacing:0.05em;text-transform:uppercase;color:var(--t3)">Last Recon</span>
+        <span></span>
+      </div>
+      <div id="clients-list"></div>
+    </div>
+  </div><!-- /clients -->
+
+  <!-- ── REPORTS ── -->
+  <div class="view" id="view-reports">
+    <div class="view-header"><div class="vh-left"><div class="vh-title">Reports &amp; Analytics</div><div class="vh-sub">Coming soon in the next release</div></div></div>
+    <div class="card"><div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Report builder coming in Q3 2026</div></div>
+  </div>
+
+  <!-- ── SETTINGS ── -->
+  <div class="view" id="view-settings">
+    <div class="view-header">
+      <div class="vh-left">
+        <div class="vh-title">Settings</div>
+        <div class="vh-sub">Platform configuration and API connection</div>
+      </div>
+    </div>
+
+    <div class="card" style="max-width:560px;margin-bottom:16px">
+      <div class="card-head">
+        <div>
+          <div class="ch-title">Live Data Connection</div>
+          <div class="ch-sub">Paste a bearer token to switch from demo to live BigQuery data</div>
+        </div>
+        <div id="mode-badge-settings"></div>
+      </div>
+      <div class="card-body">
+        <div style="margin-bottom:14px">
+          <label class="field-label">API Bearer Token</label>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <input class="input" type="password" id="settings-token-input" placeholder="eyJhbGciOiJSUzI1NiIs…" style="font-family:'JetBrains Mono',monospace;font-size:12px">
+            <button class="btn btn-teal" onclick="saveToken()" style="flex-shrink:0">Save</button>
+          </div>
+          <div class="field-hint">Token is stored in browser localStorage only — never sent to any third party. Validated against the same JWKS endpoint as the Cloud Run API.</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="clearToken()">Clear Token</button>
+          <button class="btn btn-ghost btn-sm" onclick="testConnection()">Test Connection</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="max-width:560px">
+      <div class="card-head"><div class="ch-title">About</div></div>
+      <div class="card-body">
+        <div style="font:400 13px/1.7 'Inter',sans-serif;color:var(--t2)">
+          <div><strong style="color:var(--t1)">AcumenAI</strong> by Orchelix — Accounting OS v1.0</div>
+          <div style="margin-top:6px;color:var(--t3)">GCP project: vtx-accounting-os-prod · northamerica-northeast2</div>
+          <div style="color:var(--t3)">API: <span style="font-family:'JetBrains Mono',monospace;font-size:11px" id="api-base-display"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /content-wrap -->
+
+<!-- ══════════════════════════════════════ ONBOARDING MODAL -->
+<div class="modal-overlay" id="modal-onboarding">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="mh-title">Onboard New Client</div>
+        <div class="mh-sub">Set up a new client for AI-assisted bookkeeping</div>
+      </div>
+      <button class="modal-close" onclick="closeOnboarding()">✕</button>
+    </div>
+    <form class="modal-body" id="onboarding-form" onsubmit="submitOnboarding(event)">
+      <div class="form-row">
+        <div>
+          <label class="field-label">Company Name *</label>
+          <input class="input" id="ob-company-name" type="text" required placeholder="e.g. Maple Ridge Interiors Inc.">
+        </div>
+        <div>
+          <label class="field-label">Industry</label>
+          <select class="select-ctrl" id="ob-industry">
+            <option>Interior Design</option><option>Architecture</option><option>Stone Distribution</option>
+            <option>Fabrication</option><option>HVAC</option><option>Plumbing</option>
+            <option>Construction</option><option>Legal</option><option>Accounting</option>
+            <option>Healthcare</option><option>Real Estate</option><option>Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label class="field-label">Bank Account Number</label>
+          <input class="input" id="ob-account-no" type="text" placeholder="e.g. 1234567">
+        </div>
+        <div>
+          <label class="field-label">Bank Name *</label>
+          <select class="select-ctrl" id="ob-bank" required>
+            <option value="">Select bank…</option>
+            <option>RBC</option><option>TD Bank</option><option>BMO</option>
+            <option>Scotiabank</option><option>CIBC</option><option>National Bank</option>
+            <option>American Express</option><option>Desjardins</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label class="field-label">Bank GL Account Number</label>
+          <input class="input" id="ob-gl-bank" type="text" placeholder="e.g. 1020">
+          <div class="field-hint">Sage 50 GL account for bank transactions</div>
+        </div>
+        <div>
+          <label class="field-label">Statement Email(s)</label>
+          <input class="input" id="ob-sender-email" type="text" placeholder="e.g. statements@client.com">
+          <div class="field-hint">Gmail will be watched for these senders</div>
+        </div>
+      </div>
+      <div class="form-row cols-3">
+        <div>
+          <label class="field-label">Year End (Month)</label>
+          <select class="select-ctrl" id="ob-year-end">
+            <option>January</option><option>February</option><option>March</option>
+            <option>April</option><option>May</option><option>June</option>
+            <option>July</option><option>August</option><option>September</option>
+            <option>October</option><option>November</option><option selected>December</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">GST/HST Number</label>
+          <input class="input" type="text" placeholder="e.g. 123456789 RT0001">
+        </div>
+        <div>
+          <label class="field-label">Filing Frequency</label>
+          <select class="select-ctrl">
+            <option selected>Monthly</option><option>Quarterly</option><option>Annually</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="field-label">Drop Folder Path (optional)</label>
+        <input class="input" type="text" placeholder="e.g. Google Drive: /Clients/Maple Ridge/Statements">
+        <div class="field-hint">Alternative to Gmail watcher — for emailed statement files</div>
+      </div>
+    </form>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" onclick="closeOnboarding()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitOnboarding(event)">Create Client + Start Onboarding →</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST STACK -->
+<div class="toast-stack" id="toast-stack"></div>
+
+<!-- ENTRY DETAIL MODAL -->
+<div class="modal-overlay" id="modal-entry">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">
+      <div><div class="mh-title" id="entry-modal-title">Transaction Detail</div></div>
+      <button class="modal-close" onclick="closeEntryModal()">✕</button>
+    </div>
+    <div class="modal-body" id="entry-modal-body"></div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" onclick="closeEntryModal()">Close</button>
+      <button class="btn btn-danger btn-sm" onclick="rejectFromModal()">✕ Reject</button>
+      <button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd)" onclick="approveFromModal()">✓ Approve</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════ API LAYER
+const API_BASE = window.location.origin;
+
+function getToken() { return localStorage.getItem('acumen_token') || null; }
+function setToken(t) { t ? localStorage.setItem('acumen_token', t) : localStorage.removeItem('acumen_token'); }
+
+async function apiFetch(path, opts = {}) {
+  const token = getToken();
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API_BASE + path, { ...opts, headers });
+  if (!res.ok) throw new Error(res.status + ': ' + (await res.text()));
+  return res.json();
+}
+
+function updateModeBanner() {
+  const banner = document.getElementById('mode-banner');
+  const settingsBadge = document.getElementById('mode-badge-settings');
+  const hasToken = !!getToken();
+  if (banner) {
+    banner.textContent = hasToken ? '● Live' : '◎ Demo mode';
+    banner.className = hasToken ? 'live' : 'demo';
+    banner.title = hasToken ? 'Live data — click Settings to manage token' : 'Demo mode — click to add API token';
+  }
+  if (settingsBadge) {
+    settingsBadge.innerHTML = hasToken
+      ? '<span class="badge badge-green badge-dot">Live</span>'
+      : '<span class="badge badge-gold badge-dot">Demo mode</span>';
+  }
+  const inp = document.getElementById('settings-token-input');
+  if (inp && hasToken && !inp.value) inp.value = getToken();
+  const apiDisplay = document.getElementById('api-base-display');
+  if (apiDisplay) apiDisplay.textContent = API_BASE;
+}
+
+let liveClients = [];
+
+async function fetchLiveData() {
+  if (!getToken()) return;
+
+  // Load live clients (enrich CLIENTS array with client_id for archive/posting)
+  try {
+    const clientsData = await apiFetch('/api/live/clients');
+    if (Array.isArray(clientsData) && clientsData.length > 0) {
+      liveClients = clientsData;
+      // Try to match live clients into the CLIENTS mock array by client_id substring
+      clientsData.forEach(lc => {
+        const match = CLIENTS.find(c =>
+          c.name.toLowerCase().replace(/\s+/g,'').includes(lc.client_id.replace(/-/g,'').toLowerCase()) ||
+          lc.client_id.replace(/-/g,'').toLowerCase().includes(c.name.toLowerCase().split(' ')[0])
+        );
+        if (match) {
+          match.client_id      = lc.client_id;
+          match.account_masked = lc.account_masked;
+          match.gl_bank_account = lc.gl_bank_account;
+        } else {
+          // Add as a new entry if not already in CLIENTS
+          const exists = CLIENTS.find(c => c.client_id === lc.client_id);
+          if (!exists) {
+            CLIENTS.push({
+              id: CLIENTS.length + 100, abbr: lc.client_id.slice(0,2).toUpperCase(),
+              name: lc.client_id, industry: 'Live', bank: lc.bank || '—',
+              acct: lc.account_masked || '—', unrec: 0, hst: 0,
+              recon: '—', stage: 'review', since: '—', color: '#0C7A6E',
+              hstData: [0,0,0,0,0,0],
+              client_id: lc.client_id, account_masked: lc.account_masked,
+              gl_bank_account: lc.gl_bank_account,
+            });
+          }
+        }
+      });
+      buildClientDropdown();
+      renderClientsList();
+    }
+  } catch (_) {}
+
+  // Load pending approvals
+  try {
+    const approvals = await apiFetch('/api/live/approvals?limit=50');
+    if (Array.isArray(approvals) && approvals.length >= 0) {
+      const pending = approvals.length;
+      document.getElementById('kpi-pending').textContent = pending;
+      document.getElementById('sb-pending-badge').textContent = pending;
+      if (approvals.length > 0) {
+        ENTRIES.length = 0;
+        approvals.slice(0, 30).forEach((a, i) => {
+          const amt = parseFloat(a.amount || 0);
+          ENTRIES.push({
+            id: a.queue_id || (i + 1),
+            date: a.txn_date ? String(a.txn_date).slice(5, 10) : '—',
+            desc: a.description || 'Transaction',
+            client: a.client_id || 'Unknown',
+            debit:  amt > 0 ? amt : 0,
+            credit: amt < 0 ? Math.abs(amt) : 0,
+            cat:    a.gl_account_no || '9999',
+            conf:   Math.round((parseFloat(a.confidence || 0)) * 100),
+            status: 'pending',
+            queue_id: a.queue_id,
+          });
+        });
+        renderEntriesTable();
+        renderDashEntries();
+      }
+    }
+  } catch (_) { /* stay in demo mode */ }
+
+  // Load audit feed
+  try {
+    const auditRows = await apiFetch('/api/live/audit?limit=8');
+    if (Array.isArray(auditRows) && auditRows.length > 0) {
+      ACTIVITY.length = 0;
+      auditRows.forEach(ev => {
+        const isErr = ev.severity === 'ERROR';
+        const isOk  = ev.event_status === 'OK' || ev.event_type === 'AGENT_COMPLETE';
+        ACTIVITY.push({
+          type:      ev.event_type,
+          icon:      isErr ? '⚠' : isOk ? '✓' : '·',
+          color:     isErr ? 'var(--red-bg)'  : isOk ? 'var(--green-bg)' : 'var(--teal-soft)',
+          iconColor: isErr ? 'var(--red)'     : isOk ? 'var(--green)'    : 'var(--teal)',
+          text:      ev.action || ev.event_type || 'Event',
+          meta:      (ev.agent_id || '') + ' · ' + (ev.event_ts ? new Date(ev.event_ts).toLocaleString() : ''),
+        });
+      });
+      renderActivity();
+    }
+  } catch (_) { /* keep mock */ }
+}
+
+function saveToken() {
+  const val = (document.getElementById('settings-token-input')?.value || '').trim();
+  setToken(val || null);
+  updateModeBanner();
+  if (val) {
+    showToast('Token saved — fetching live data…', 'success');
+    fetchLiveData();
+  } else {
+    showToast('Token cleared · demo mode active', 'info');
+  }
+}
+function clearToken() {
+  setToken(null);
+  const inp = document.getElementById('settings-token-input');
+  if (inp) inp.value = '';
+  updateModeBanner();
+  showToast('Token cleared · demo mode active', 'info');
+}
+async function testConnection() {
+  try {
+    const h = await apiFetch('/api/health');
+    showToast('API connected · ' + JSON.stringify(h), 'success');
+  } catch (e) {
+    showToast('Connection failed: ' + e.message, 'warning');
+  }
+}
+
+// ════════════════════════════════════════ DATA
+const CLIENTS = [
+  { id:1, abbr:'MR', name:'Maple Ridge Interiors Inc.', industry:'Interior Design',  bank:'RBC',  acct:'RBC-7823', unrec:23, hst:4210,  recon:'May 31, 2026', stage:'review', since:'Jan 2026', color:'#0A2540', hstData:[6200,7100,8400,7900,9400,4210] },
+  { id:2, abbr:'SS', name:'Summit Stone Group',         industry:'Stone Distribution',bank:'TD',   acct:'TD-3301',  unrec:41, hst:8640,  recon:'May 28, 2026', stage:'post',   since:'Oct 2025', color:'#0C7A6E', hstData:[9100,10200,11800,10500,12800,8640] },
+  { id:3, abbr:'HH', name:'Horizon HVAC Ltd.',           industry:'HVAC',             bank:'BMO',  acct:'BMO-9104', unrec:12, hst:2180,  recon:'May 30, 2026', stage:'review', since:'Mar 2026', color:'#2563EB', hstData:[3200,3800,4100,3700,4400,2180] },
+  { id:4, abbr:'PL', name:'Parkview Legal LLP',          industry:'Legal',            bank:'RBC',  acct:'RBC-4412', unrec:8,  hst:1450,  recon:'May 31, 2026', stage:'hst',    since:'Nov 2025', color:'#7C3AED', hstData:[2100,2400,2600,2200,2900,1450] },
+  { id:5, abbr:'GA', name:'GlassHouse Architecture',     industry:'Architecture',     bank:'Amex', acct:'Amex-8871',unrec:0,  hst:0,     recon:'—',            stage:'onboarding',since:'Jun 2026',color:'#B45309', hstData:[0,0,0,0,0,0] },
+];
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const ENTRIES = [
+  { id:1,  date:'Jun 3',  desc:'RBC Chequing — e-Transfer Received',       client:'Maple Ridge Interiors', debit:2450.00, credit:0,       cat:'Revenue',           conf:98, status:'pending' },
+  { id:2,  date:'Jun 3',  desc:'Atlas Stone Supply Ltd.',                   client:'Summit Stone Group',    debit:0,       credit:8920.50, cat:'Cost of Goods',     conf:95, status:'pending' },
+  { id:3,  date:'Jun 2',  desc:'Google Workspace — Monthly Subscription',  client:'Maple Ridge Interiors', debit:0,       credit:86.24,   cat:'Software & IT',     conf:99, status:'pending' },
+  { id:4,  date:'Jun 2',  desc:'Yorkdale Mall Showroom Lease',              client:'Maple Ridge Interiors', debit:0,       credit:4200.00, cat:'Rent & Occupancy',  conf:97, status:'pending' },
+  { id:5,  date:'Jun 1',  desc:'TD Mastercard — June Statement',            client:'Summit Stone Group',    debit:0,       credit:3312.88, cat:'Mixed — needs split',conf:72,status:'review'  },
+  { id:6,  date:'Jun 1',  desc:'HVAC Supply Co. — Invoice #2241',           client:'Horizon HVAC Ltd.',     debit:0,       credit:1876.40, cat:'Cost of Goods',     conf:94, status:'pending' },
+  { id:7,  date:'May 31', desc:'RBC Business Line — Interest Charge',       client:'Parkview Legal LLP',    debit:0,       credit:318.75,  cat:'Bank Charges',      conf:99, status:'pending' },
+  { id:8,  date:'May 31', desc:'Client Invoice #1084 — Retainer',           client:'Parkview Legal LLP',    debit:5000.00, credit:0,       cat:'Revenue',           conf:96, status:'pending' },
+  { id:9,  date:'May 30', desc:'Costco Wholesale — Office Supplies',        client:'Horizon HVAC Ltd.',     debit:0,       credit:244.60,  cat:'Office Supplies',   conf:91, status:'pending' },
+  { id:10, date:'May 29', desc:'BMO Chequing — Payroll Direct Deposit',     client:'Horizon HVAC Ltd.',     debit:0,       credit:12400.00,cat:'Payroll',           conf:99, status:'pending' },
+  { id:11, date:'May 28', desc:'Toronto Hydro — Electricity',               client:'Summit Stone Group',    debit:0,       credit:982.33,  cat:'Utilities',         conf:98, status:'pending' },
+  { id:12, date:'May 27', desc:'Amex — Purchase: Canarm Lighting',          client:'Maple Ridge Interiors', debit:0,       credit:3640.00, cat:'Inventory / FF&E',  conf:88, status:'pending' },
+];
+const ACTIVITY = [
+  { type:'approve', icon:'✓', color:'var(--green-bg)', iconColor:'var(--green)',   text:'8 entries approved',                  meta:'Summit Stone Group · 4m ago' },
+  { type:'watcher', icon:'📧', color:'var(--blue-bg)',  iconColor:'var(--blue)',    text:'Gmail Watcher detected 3 statements', meta:'TD Bank · Maple Ridge · 12m ago' },
+  { type:'post',    icon:'→',  color:'#EEF2F6',         iconColor:'var(--navy)',    text:'31 entries posted to Sage 50',        meta:'All clients · 2h ago' },
+  { type:'hst',     icon:'$',  color:'var(--amber-bg)', iconColor:'var(--amber)',   text:'HST filing reminder — 14 days',       meta:'Horizon HVAC Ltd. · 3h ago' },
+  { type:'client',  icon:'+',  color:'var(--teal-soft)',iconColor:'#0C7A6E',        text:'New client onboarded',                meta:'GlassHouse Architecture · 1d ago' },
+  { type:'approve', icon:'✓', color:'var(--green-bg)', iconColor:'var(--green)',   text:'12 entries approved',                 meta:'Parkview Legal LLP · 1d ago' },
+  { type:'watcher', icon:'📧', color:'var(--blue-bg)',  iconColor:'var(--blue)',    text:'RBC statement processed (8 pages)',   meta:'Maple Ridge Interiors · 1d ago' },
+  { type:'post',    icon:'→',  color:'#EEF2F6',         iconColor:'var(--navy)',    text:'18 entries posted to Sage 50',        meta:'Summit Stone · 2d ago' },
+];
+const WATCHER_DETECTIONS = [
+  { date:'Jun 3, 9:42am',  client:'Maple Ridge Interiors Inc.', bank:'RBC',  subject:'Your RBC Business Account Statement — June 2026', stmts:1, entries:14, status:'processed' },
+  { date:'Jun 3, 9:40am',  client:'Summit Stone Group',         bank:'TD',   subject:'TD Business Banking Statement Available',          stmts:1, entries:22, status:'processed' },
+  { date:'Jun 1, 8:15am',  client:'Maple Ridge Interiors Inc.', bank:'Amex', subject:'American Express — Statement Ready',               stmts:1, entries:11, status:'processed' },
+  { date:'May 31, 7:58am', client:'Horizon HVAC Ltd.',          bank:'BMO',  subject:'Your BMO Statement for May 2026',                  stmts:1, entries:18, status:'review'    },
+  { date:'May 31, 7:55am', client:'Parkview Legal LLP',         bank:'RBC',  subject:'RBC Statement — Business Chequing',                stmts:2, entries:9,  status:'processed' },
+];
+const SAGE_HISTORY = [
+  { posted:'Jun 3, 2026',  client:'Summit Stone Group',    period:'May 2026', entries:22, total:'$42,318.50', by:'Jordan K.' },
+  { posted:'Jun 2, 2026',  client:'Maple Ridge Interiors', period:'May 2026', entries:18, total:'$28,640.00', by:'Jordan K.' },
+  { posted:'Jun 1, 2026',  client:'Parkview Legal LLP',    period:'May 2026', entries:9,  total:'$18,425.75', by:'AI Agent'  },
+  { posted:'May 30, 2026', client:'Horizon HVAC Ltd.',     period:'May 2026', entries:14, total:'$21,100.40', by:'Jordan K.' },
+  { posted:'May 15, 2026', client:'Summit Stone Group',    period:'Apr 2026', entries:19, total:'$38,200.00', by:'Jordan K.' },
+];
+
+// ════════════════════════════════════════ STATE
+let currentClient   = CLIENTS[0];
+let currentMonth    = { y: 2026, m: 5 };
+let selectedIds     = new Set();
+let dashSelIds      = new Set();
+let currentEntryId  = null;
+
+// ════════════════════════════════════════ NAV
+function switchView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.sb-item[data-view]').forEach(i => i.classList.remove('active'));
+  const view = document.getElementById('view-' + id);
+  if (view) view.classList.add('active');
+  const navItem = document.querySelector('.sb-item[data-view="' + id + '"]');
+  if (navItem) navItem.classList.add('active');
+  const titles = { dashboard:'Dashboard', watcher:'Gmail Watcher', entries:'Review Entries', hst:'HST Tracker', sage:'Sage 50 Posting', clients:'Clients', reports:'Reports', settings:'Settings' };
+  document.getElementById('page-title').textContent = titles[id] || id;
+  if (id === 'settings') updateModeBanner();
+  if (id === 'sage') loadUnposted();
+  if (id === 'clients') renderClientsList();
+}
+
+// ════════════════════════════════════════ CLIENT SELECTOR
+function buildClientDropdown() {
+  const list = document.getElementById('client-list');
+  list.innerHTML = '';
+  CLIENTS.forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'dd-item' + (c.id === currentClient.id ? ' active' : '');
+    d.innerHTML = '<span class="di-dot" style="background:' + c.color + '"></span><div><div class="di-name">' + c.name + '</div><div class="di-industry">' + c.industry + '</div></div>';
+    d.onclick = () => setClient(c);
+    list.appendChild(d);
+  });
+  ['watcher-client-select','entries-client-filter'].forEach(sid => {
+    const sel = document.getElementById(sid);
+    if (!sel) return;
+    const curVal = sel.value;
+    while (sel.options.length > 1) sel.remove(1);
+    CLIENTS.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o); });
+    sel.value = curVal;
+  });
+}
+
+function toggleClientDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('client-dropdown');
+  const btn = document.getElementById('client-btn');
+  const rect = btn.getBoundingClientRect();
+  dd.style.top  = (rect.bottom + 6) + 'px';
+  dd.style.left = rect.left + 'px';
+  dd.classList.toggle('open');
+  if (dd.classList.contains('open')) document.getElementById('client-search').focus();
+}
+document.addEventListener('click', () => document.getElementById('client-dropdown').classList.remove('open'));
+
+function filterClients(q) {
+  document.querySelectorAll('#client-list .dd-item').forEach(item => {
+    item.style.display = item.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+  });
+}
+
+function setClient(c) {
+  currentClient = c;
+  document.getElementById('client-dropdown').classList.remove('open');
+  document.getElementById('cs-name').textContent = c.name;
+  document.getElementById('cq-logo').textContent = c.abbr;
+  document.getElementById('cq-logo').style.background = 'linear-gradient(135deg, ' + c.color + ' 0%, #1B355A 100%)';
+  document.getElementById('cq-name').textContent = c.name;
+  document.getElementById('cq-meta').textContent = c.industry + ' · ' + c.acct + ' · Active since ' + c.since;
+  document.getElementById('cq-unrec').textContent = c.unrec;
+  document.getElementById('cq-hst').textContent = '$' + c.hst.toLocaleString();
+  document.getElementById('cq-recon').textContent = c.recon;
+  document.getElementById('cq-client-watcher').textContent = c.name + ' · ' + c.bank + ' / TD / Amex';
+  buildClientDropdown();
+  renderHSTChart();
+}
+
+function filterEntriesByClient(_val) { renderEntriesTable(); }
+function updateWatcherClient() {}
+function searchClients(_q) {}
+
+// ════════════════════════════════════════ ACTIVITY FEED
+function renderActivity() {
+  const feed = document.getElementById('activity-feed');
+  feed.innerHTML = ACTIVITY.map(a =>
+    '<div class="act-item"><div class="act-icon" style="background:' + a.color + '"><span style="font-size:13px;color:' + a.iconColor + '">' + a.icon + '</span></div><div class="act-text"><div class="act-title">' + a.text + '</div><div class="act-meta">' + a.meta + '</div></div></div>'
+  ).join('');
+}
+
+// ════════════════════════════════════════ WATCHER PREVIEW
+function renderWatcherPreview() {
+  const tbody = document.getElementById('watcher-preview');
+  tbody.innerHTML = WATCHER_DETECTIONS.slice(0,4).map(d =>
+    '<tr><td><span class="mono">' + d.date + '</span></td><td>' + d.client + '</td>' +
+    '<td><span class="badge badge-navy">' + d.bank + '</span></td>' +
+    '<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--t2)">' + d.subject + '</td>' +
+    '<td><span class="badge badge-blue">' + d.stmts + ' stmt</span></td>' +
+    '<td><span class="badge ' + (d.status==='processed'?'badge-green':'badge-gold') + ' badge-dot">' + (d.status==='processed'?'Processed':'Needs Review') + '</span></td></tr>'
+  ).join('');
+}
+
+function renderWatcherFull() {
+  const tbody = document.getElementById('watcher-full-table');
+  tbody.innerHTML = WATCHER_DETECTIONS.map(d =>
+    '<tr><td><span class="mono">' + d.date + '</span></td><td>' + d.client + '</td>' +
+    '<td><span class="badge badge-navy">' + d.bank + '</span></td>' +
+    '<td style="font-size:12px;color:var(--t2)">' + d.subject + '</td>' +
+    '<td style="font-weight:600">' + d.stmts + '</td>' +
+    '<td style="font-weight:600">' + d.entries + ' entries</td>' +
+    '<td><span class="badge ' + (d.status==='processed'?'badge-green':'badge-gold') + ' badge-dot">' + (d.status==='processed'?'Processed':'Needs Review') + '</span></td></tr>'
+  ).join('');
+}
+
+// ════════════════════════════════════════ MONTH
+function fmtMonth() { return MONTHS[currentMonth.m] + ' ' + currentMonth.y; }
+function changeMonth(dir) {
+  currentMonth.m += dir;
+  if (currentMonth.m < 0)  { currentMonth.m = 11; currentMonth.y--; }
+  if (currentMonth.m > 11) { currentMonth.m = 0;  currentMonth.y++; }
+  ['dash-month-label','entries-month-label','hst-month-label'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = fmtMonth();
+  });
+}
+
+// ════════════════════════════════════════ ENTRIES TABLE
+function conf(pct) {
+  const color = pct>=95 ? 'var(--teal)' : pct>=80 ? 'var(--amber)' : 'var(--red)';
+  return '<div style="display:flex;align-items:center;gap:7px"><div class="conf-bar"><div class="fill" style="width:' + pct + '%;background:' + color + '"></div></div><span class="conf-pct">' + pct + '%</span></div>';
+}
+
+function statusBadge(s) {
+  if (s==='pending')  return '<span class="badge badge-gold badge-dot">Pending</span>';
+  if (s==='review')   return '<span class="badge badge-red badge-dot">Needs Review</span>';
+  if (s==='approved') return '<span class="badge badge-green badge-dot">Approved</span>';
+  return '<span class="badge badge-navy">' + s + '</span>';
+}
+
+function renderEntriesTable(tableId) {
+  tableId = tableId || 'entries-table';
+  const tbody = document.getElementById(tableId);
+  if (!tbody) return;
+  const filterClient = tableId==='entries-table' ? (document.getElementById('entries-client-filter')?.value || 'all') : 'all';
+  let rows = ENTRIES.filter(e => e.status !== 'approved');
+  if (filterClient !== 'all') {
+    const c = CLIENTS.find(c => c.id == filterClient);
+    if (c) rows = rows.filter(e => e.client.includes(c.name.split(' ')[0]));
+  }
+  const selSet = tableId === 'entries-table' ? selectedIds : dashSelIds;
+  tbody.innerHTML = rows.map(e =>
+    '<tr class="' + (selSet.has(e.id)?'selected':'') + '" id="erow-' + e.id + '-' + tableId + '">' +
+    '<td><input type="checkbox" ' + (selSet.has(e.id)?'checked':'') + ' onchange="toggleEntry(' + e.id + ',\'' + tableId + '\',this)"></td>' +
+    '<td><span class="mono">' + e.date + '</span></td>' +
+    '<td><div style="font-weight:500">' + e.desc + '</div><div class="td-sub">' + e.client + '</div></td>' +
+    (tableId==='entries-table' ? '<td style="font-size:12px;color:var(--t2)">' + e.client + '</td>' : '') +
+    '<td style="font-weight:600;color:' + (e.debit>0?'var(--green)':'var(--t4)') + '">' + (e.debit>0?'$'+e.debit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
+    '<td style="font-weight:600;color:' + (e.credit>0?'var(--red)':'var(--t4)') + '">' + (e.credit>0?'$'+e.credit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
+    '<td><span class="badge badge-navy">' + e.cat + '</span></td>' +
+    '<td>' + conf(e.conf) + '</td>' +
+    '<td>' + statusBadge(e.status) + '</td>' +
+    '<td><button class="btn btn-ghost btn-sm" onclick="openEntryModal(' + e.id + ')" style="font-size:11px">Detail</button></td>' +
+    '</tr>'
+  ).join('') || '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--t3);font-size:13px">All entries approved for this period ✓</td></tr>';
+}
+
+function renderDashEntries() {
+  const tbody = document.getElementById('dash-entries-table');
+  if (!tbody) return;
+  const rows = ENTRIES.filter(e => e.status !== 'approved').slice(0, 5);
+  tbody.innerHTML = rows.map(e =>
+    '<tr class="' + (dashSelIds.has(e.id)?'selected':'') + '">' +
+    '<td><input type="checkbox" ' + (dashSelIds.has(e.id)?'checked':'') + ' onchange="toggleDashEntry(' + e.id + ',this)"></td>' +
+    '<td><span class="mono">' + e.date + '</span></td>' +
+    '<td><div style="font-weight:500">' + e.desc + '</div></td>' +
+    '<td style="font-size:12px;color:var(--t2)">' + e.client + '</td>' +
+    '<td style="font-weight:600;color:' + (e.debit>0?'var(--green)':'var(--t4)') + '">' + (e.debit>0?'$'+e.debit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
+    '<td style="font-weight:600;color:' + (e.credit>0?'var(--red)':'var(--t4)') + '">' + (e.credit>0?'$'+e.credit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
+    '<td><span class="badge badge-navy" style="font-size:10px">' + e.cat + '</span></td>' +
+    '<td>' + conf(e.conf) + '</td>' +
+    '<td>' + statusBadge(e.status) + '</td>' +
+    '</tr>'
+  ).join('');
+}
+
+function toggleEntry(id, tableId, cb) {
+  const set = tableId === 'entries-table' ? selectedIds : dashSelIds;
+  cb.checked ? set.add(id) : set.delete(id);
+  updateEntriesToolbar(tableId);
+}
+function toggleDashEntry(id, cb) { toggleEntry(id,'dash-entries-table',cb); }
+function toggleAllEntries(cb) {
+  ENTRIES.filter(e=>e.status!=='approved').forEach(e => cb.checked ? selectedIds.add(e.id) : selectedIds.delete(e.id));
+  renderEntriesTable();
+  updateEntriesToolbar('entries-table');
+}
+function toggleAllDash(cb) {
+  ENTRIES.filter(e=>e.status!=='approved').slice(0,5).forEach(e => cb.checked ? dashSelIds.add(e.id) : dashSelIds.delete(e.id));
+  renderDashEntries();
+  updateEntriesToolbar('dash-entries-table');
+}
+function updateEntriesToolbar(tableId) {
+  if (tableId==='entries-table') {
+    const n = selectedIds.size, total = ENTRIES.filter(e=>e.status!=='approved').length;
+    document.getElementById('entries-sel-count').textContent = n + ' of ' + total + ' selected';
+    document.getElementById('approve-btn').disabled = n===0;
+    document.getElementById('reject-btn').disabled  = n===0;
+  } else {
+    const n = dashSelIds.size;
+    document.getElementById('dash-sel-count').textContent = n + ' selected';
+    document.getElementById('dash-approve-btn').disabled = n===0;
+    document.getElementById('dash-reject-btn').disabled  = n===0;
+  }
+}
+
+async function approveSelected() {
+  const n = selectedIds.size;
+  const ids = [...selectedIds];
+  ids.forEach(id => { const e = ENTRIES.find(x=>x.id===id); if(e) e.status='approved'; });
+  selectedIds.clear();
+  if (getToken()) {
+    try {
+      await Promise.allSettled(ids.map(id => {
+        const e = ENTRIES.find(x=>x.id===id);
+        if (!e?.queue_id) return Promise.resolve();
+        return apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' });
+      }));
+    } catch (_) {}
+  }
+  renderEntriesTable();
+  updateEntriesToolbar('entries-table');
+  const pending = ENTRIES.filter(e=>e.status==='pending'||e.status==='review').length;
+  document.getElementById('kpi-pending').textContent = pending;
+  document.getElementById('sb-pending-badge').textContent = pending;
+  showToast(n + ' entr' + (n===1?'y':'ies') + ' approved and queued for Sage 50', 'success');
+}
+function rejectSelected() {
+  const n = selectedIds.size; selectedIds.clear();
+  renderEntriesTable(); updateEntriesToolbar('entries-table');
+  showToast(n + ' entr' + (n===1?'y':'ies') + ' flagged for manual review', 'warning');
+}
+async function approveDash() {
+  const n = dashSelIds.size;
+  const ids = [...dashSelIds];
+  ids.forEach(id => { const e = ENTRIES.find(x=>x.id===id); if(e) e.status='approved'; });
+  dashSelIds.clear();
+  if (getToken()) {
+    try {
+      await Promise.allSettled(ids.map(id => {
+        const e = ENTRIES.find(x=>x.id===id);
+        if (!e?.queue_id) return Promise.resolve();
+        return apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' });
+      }));
+    } catch (_) {}
+  }
+  renderDashEntries(); updateEntriesToolbar('dash-entries-table');
+  showToast(n + ' entr' + (n===1?'y':'ies') + ' approved', 'success');
+}
+function rejectDash() {
+  const n = dashSelIds.size; dashSelIds.clear();
+  renderDashEntries(); updateEntriesToolbar('dash-entries-table');
+  showToast(n + ' entr' + (n===1?'y':'ies') + ' flagged', 'warning');
+}
+function exportEntries() { showToast('CSV export prepared — check your downloads', 'info'); }
+
+// ════════════════════════════════════════ ENTRY MODAL
+function openEntryModal(id) {
+  currentEntryId = id;
+  const e = ENTRIES.find(x=>x.id===id); if(!e) return;
+  document.getElementById('entry-modal-title').textContent = 'Transaction: ' + e.desc.slice(0,32) + (e.desc.length>32?'…':'');
+  document.getElementById('entry-modal-body').innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">' +
+    '<div><div class="field-label">Date</div><div style="font:500 14px/1 \'Inter\',sans-serif;color:var(--t1);margin-top:6px">' + e.date + '</div></div>' +
+    '<div><div class="field-label">Client</div><div style="font:500 14px/1 \'Inter\',sans-serif;color:var(--t1);margin-top:6px">' + e.client + '</div></div>' +
+    '<div><div class="field-label">Debit</div><div style="font:600 16px/1 \'Inter\',sans-serif;color:var(--green);margin-top:6px">' + (e.debit>0?'$'+e.debit.toFixed(2):'—') + '</div></div>' +
+    '<div><div class="field-label">Credit</div><div style="font:600 16px/1 \'Inter\',sans-serif;color:var(--red);margin-top:6px">' + (e.credit>0?'$'+e.credit.toFixed(2):'—') + '</div></div>' +
+    '</div>' +
+    '<div style="margin-bottom:14px"><div class="field-label">AI Suggested Category</div>' +
+    '<div style="margin-top:8px;display:flex;align-items:center;gap:10px"><span class="badge badge-teal">' + e.cat + '</span>' +
+    '<span style="font:400 12px/1 \'Inter\',sans-serif;color:var(--t3)">Confidence: ' + e.conf + '%</span></div></div>' +
+    '<div style="margin-bottom:14px"><label class="field-label">Override Category</label>' +
+    '<select class="select-ctrl" style="margin-top:6px">' +
+    ['Revenue','Cost of Goods','Rent & Occupancy','Payroll','Bank Charges','Software & IT','Office Supplies','Utilities','Inventory / FF&E','Mixed — needs split'].map(c=>'<option ' + (c===e.cat?'selected':'') + '>' + c + '</option>').join('') +
+    '</select></div>' +
+    '<div><label class="field-label">Notes</label><input class="input" type="text" placeholder="Optional note for this transaction…" style="margin-top:6px"></div>';
+  document.getElementById('modal-entry').classList.add('open');
+}
+function closeEntryModal() { document.getElementById('modal-entry').classList.remove('open'); }
+async function approveFromModal() {
+  if (!currentEntryId) return;
+  const e = ENTRIES.find(x=>x.id===currentEntryId);
+  if (e) {
+    e.status = 'approved';
+    if (getToken() && e.queue_id) {
+      try { await apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' }); } catch (_) {}
+    }
+  }
+  closeEntryModal(); renderEntriesTable(); renderDashEntries();
+  showToast('Entry approved', 'success');
+}
+function rejectFromModal() { closeEntryModal(); showToast('Entry flagged for manual review', 'warning'); }
+
+// ════════════════════════════════════════ UTILITIES
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function appendLogLine(log, msg, cls) {
+  const now = new Date();
+  const ts = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()).padStart(2,'0');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = '<span class="ts">' + ts + '</span><span class="' + (cls||'') + '">' + escHtml(msg) + '</span>';
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ════════════════════════════════════════ SIGN-IN
+function showSignIn() {
+  const el = document.getElementById('signin-overlay');
+  if (el) el.classList.remove('hidden');
+}
+function hideSignIn() {
+  const el = document.getElementById('signin-overlay');
+  if (el) el.classList.add('hidden');
+}
+function signIn() {
+  const val = (document.getElementById('signin-token-input')?.value || '').trim();
+  if (!val) { showToast('Paste your API token first', 'warning'); return; }
+  setToken(val);
+  hideSignIn();
+  updateModeBanner();
+  showToast('Token saved — loading live data…', 'success');
+  fetchLiveData();
+  loadUnposted();
+}
+function continueDemo() {
+  hideSignIn();
+  showToast('Demo mode active — Settings → add token to connect live data', 'info');
+}
+
+// ════════════════════════════════════════ UNPOSTED
+let unpostedEntries = [];
+
+async function loadUnposted() {
+  if (!getToken()) return;
+  try {
+    const data = await apiFetch('/api/live/unposted?limit=100');
+    if (Array.isArray(data)) {
+      unpostedEntries = data;
+      renderUnpostedTable();
+      const n = data.length;
+      const countEl = document.getElementById('sage-unposted-count');
+      if (countEl) countEl.textContent = n;
+      const descEl = document.getElementById('sage-unposted-desc');
+      if (descEl) descEl.textContent = n + ' entr' + (n === 1 ? 'y' : 'ies') + ' approved and ready to post.';
+    }
+  } catch (_) {}
+}
+
+function renderUnpostedTable() {
+  const tbody = document.getElementById('unposted-entries-tbody');
+  if (!tbody) return;
+  if (!unpostedEntries.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--t3);font-size:13px">No approved entries awaiting posting ✓</td></tr>';
+    return;
+  }
+  tbody.innerHTML = unpostedEntries.map(r => {
+    const amt = parseFloat(r.amount || 0);
+    const pos = amt >= 0;
+    return '<tr>' +
+      '<td><span class="mono">' + (r.txn_date ? String(r.txn_date).slice(0, 10) : '—') + '</span></td>' +
+      '<td><div style="font-weight:500">' + escHtml(r.description || '—') + '</div>' +
+        '<div class="td-sub">' + escHtml(r.account_no || '') + '</div></td>' +
+      '<td style="font-size:12px;color:var(--t2)">' + escHtml(r.client_id || '—') + '</td>' +
+      '<td style="font-weight:600;color:' + (pos ? 'var(--green)' : 'var(--t4)') + '">' +
+        (pos ? '$' + Math.abs(amt).toFixed(2) : '—') + '</td>' +
+      '<td style="font-weight:600;color:' + (!pos ? 'var(--red)' : 'var(--t4)') + '">' +
+        (!pos ? '$' + Math.abs(amt).toFixed(2) : '—') + '</td>' +
+      '<td><span class="badge badge-navy">' + escHtml(r.final_gl_no || r.gl_account_no || '?') + '</span></td>' +
+      '<td><span class="badge badge-green badge-dot">Approved</span></td>' +
+      '</tr>';
+  }).join('');
+}
+
+// ════════════════════════════════════════ ARCHIVE CLIENT
+async function archiveClient(clientId) {
+  if (!confirm('Archive all BQ records for client "' + clientId + '"?\n\nThis marks them ARCHIVED and removes them from active queues.')) return;
+  try {
+    const result = await apiFetch('/api/ops/archive-client/' + encodeURIComponent(clientId), { method: 'POST' });
+    showToast('Client "' + clientId + '" archived (' + (result.rows_archived || 0) + ' records)', 'success');
+    fetchLiveData();
+    loadUnposted();
+  } catch (err) {
+    showToast('Archive failed: ' + err.message, 'warning');
+  }
+}
+
+// ════════════════════════════════════════ WATCHER
+function toggleBank(el) { el.classList.toggle('selected'); }
+
+const LOG_MESSAGES = [
+  'Authenticating with Google OAuth…','✓ Authentication successful',
+  'Scanning Gmail label: Finance/Bank Statements…',
+  'Found 3 unprocessed threads in RBC folder…',
+  'Downloading RBC-Statement-June2026.pdf (2.1 MB)…',
+  '✓ RBC statement parsed: 14 transactions, Jun 1–3 2026',
+  'Scanning TD Bank threads…','Found 1 new statement: TD-Business-Jun2026.pdf',
+  '✓ TD statement parsed: 8 transactions',
+  'Scanning American Express threads…','✓ Amex statement: 11 transactions found',
+  'Running AI categorisation on 33 transactions…',
+  '✓ 31 transactions auto-categorised (93.9% avg confidence)',
+  '⚠ 2 transactions flagged for manual review (low confidence)',
+  'Writing 33 entries to BigQuery: acumenai.entries_pending…',
+  '✓ Done — 33 entries ready for approval',
+];
+
+async function runWatcher() {
+  const btn = document.getElementById('run-watcher-btn');
+  if (btn.dataset.running) return;
+
+  if (!getToken()) {
+    _runWatcherDemo();
+    return;
+  }
+
+  btn.dataset.running = true;
+  btn.textContent = '⏳ Running…';
+  btn.disabled = true;
+  const logWrap = document.getElementById('watcher-log-wrap');
+  const log     = document.getElementById('watcher-log');
+  const badge   = document.getElementById('watcher-progress-badge');
+  logWrap.classList.add('visible');
+  log.innerHTML = '';
+  document.getElementById('watcher-run-status').textContent = 'Connecting…';
+  appendLogLine(log, '[AcumenAI] Starting Gmail Watcher (dry-run)…', 'info');
+
+  const clientSel = document.getElementById('watcher-client-select');
+  const clientVal = clientSel?.value && clientSel.value !== 'all' ? clientSel.value : null;
+  const qs = new URLSearchParams({ dry_run: 'true' });
+  if (clientVal) {
+    const c = CLIENTS.find(x => String(x.id) === String(clientVal));
+    if (c?.client_id) qs.set('client', c.client_id);
+  }
+
+  try {
+    const result = await apiFetch('/api/ops/run-watcher?' + qs.toString(), { method: 'POST' });
+    (result.lines || []).forEach(line => {
+      const cls = line.startsWith('✓') || /ok|success/i.test(line) ? 'ok'
+                : line.startsWith('⚠') || /error|fail|warn/i.test(line) ? 'warn'
+                : line.startsWith('[') || /info|start|connect/i.test(line) ? 'info' : '';
+      appendLogLine(log, line, cls);
+    });
+    if (result.ok) {
+      btn.textContent = '✓ Complete';
+      btn.style.background = 'var(--green)';
+      document.getElementById('watcher-run-status').textContent = 'Completed · ' + (result.lines||[]).length + ' log lines';
+      badge.innerHTML = '<span class="badge badge-green badge-dot">Done</span>';
+      showToast('Gmail Watcher completed — check the log for new entries', 'success');
+      setTimeout(() => { fetchLiveData(); loadUnposted(); }, 1000);
+    } else {
+      btn.textContent = '⚠ Check Log';
+      btn.style.background = 'var(--amber)';
+      document.getElementById('watcher-run-status').textContent = 'Finished with warnings';
+      badge.innerHTML = '<span class="badge badge-gold badge-dot">Check log</span>';
+      showToast('Watcher finished — check the log for details', 'warning');
+    }
+  } catch (err) {
+    appendLogLine(log, 'ERROR: ' + err.message, 'warn');
+    btn.textContent = '⚠ Failed';
+    btn.style.background = 'var(--red)';
+    showToast('Watcher request failed: ' + err.message, 'warning');
+  }
+  setTimeout(() => {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Gmail Watcher';
+    btn.disabled = false; btn.style.background = ''; delete btn.dataset.running;
+  }, 4000);
+}
+
+function _runWatcherDemo() {
+  const btn = document.getElementById('run-watcher-btn');
+  btn.dataset.running = true;
+  btn.textContent = '⏳ Running…';
+  btn.disabled = true;
+  const logWrap = document.getElementById('watcher-log-wrap');
+  const log     = document.getElementById('watcher-log');
+  const badge   = document.getElementById('watcher-progress-badge');
+  logWrap.classList.add('visible');
+  log.innerHTML = '';
+  document.getElementById('watcher-run-status').textContent = 'Running…';
+  let i = 0;
+  const now = new Date();
+  function step() {
+    if (i >= LOG_MESSAGES.length) {
+      btn.textContent = '✓ Complete';
+      btn.style.background = 'var(--green)';
+      document.getElementById('watcher-run-status').textContent = 'Last run: just now · 33 entries generated (demo)';
+      badge.innerHTML = '<span class="badge badge-green badge-dot">33 entries</span>';
+      showToast('Gmail Watcher complete (demo) — 33 entries queued for review', 'success');
+      setTimeout(() => {
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Gmail Watcher';
+        btn.disabled = false; btn.style.background = ''; delete btn.dataset.running;
+      }, 3000);
+      return;
+    }
+    const msg = LOG_MESSAGES[i++];
+    const ts  = now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()+i).padStart(2,'0');
+    const cls = msg.startsWith('✓') ? 'ok' : msg.startsWith('⚠') ? 'warn' : (msg.startsWith('Running')||msg.startsWith('Writing')) ? 'info' : '';
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = '<span class="ts">' + ts + '</span><span class="' + cls + '">' + msg + '</span>';
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+    setTimeout(step, 220 + Math.random()*280);
+  }
+  step();
+}
+
+async function quickRunWatcher() {
+  if (!getToken()) {
+    showToast('Gmail Watcher started for ' + currentClient.name + ' (demo)', 'info');
+    setTimeout(() => showToast('3 new statements detected · 14 entries queued (demo)', 'success'), 2800);
+    return;
+  }
+  showToast('Running Gmail Watcher for ' + currentClient.name + '…', 'info');
+  try {
+    const qs = new URLSearchParams({ dry_run: 'true' });
+    if (currentClient.client_id) qs.set('client', currentClient.client_id);
+    const result = await apiFetch('/api/ops/run-watcher?' + qs.toString(), { method: 'POST' });
+    if (result.ok) {
+      showToast('Watcher complete for ' + currentClient.name, 'success');
+      fetchLiveData(); loadUnposted();
+    } else {
+      showToast('Watcher finished with warnings — check Gmail Watcher view', 'warning');
+    }
+  } catch (err) {
+    showToast('Watcher failed: ' + err.message, 'warning');
+  }
+}
+function loadFromFolder() { showToast('Opening Google Drive folder picker…', 'info'); }
+
+// ════════════════════════════════════════ HST CHART
+function renderHSTChart() {
+  const svg = document.getElementById('hst-chart');
+  if (!svg) return;
+  const data  = currentClient.hstData;
+  const remit = data.map(v => Math.round(v * 0.74));
+  const labels = ['Jan','Feb','Mar','Apr','May','Jun'];
+  const W=460, H=180, padL=42, padB=26, padT=12, padR=12;
+  const chartW=W-padL-padR, chartH=H-padT-padB;
+  const maxV = Math.max(...data, ...remit, 1);
+  const bw=18, gap=6, groupW=bw*2+gap;
+  const groupGap = (chartW - labels.length*groupW) / (labels.length+1);
+  let out = '<g transform="translate(' + padL + ',' + padT + ')">';
+  for (let i=0; i<=4; i++) {
+    const y   = chartH - (i/4)*chartH;
+    const val = Math.round((i/4)*maxV);
+    out += '<line x1="0" y1="' + y.toFixed(1) + '" x2="' + chartW + '" y2="' + y.toFixed(1) + '" stroke="#E4E8EE" stroke-width="1"/>';
+    out += '<text x="-6" y="' + (y+4).toFixed(1) + '" text-anchor="end" font-size="9" fill="#6D7F95" font-family="Inter,sans-serif">$' + (val>=1000?(val/1000).toFixed(0)+'K':val) + '</text>';
+  }
+  labels.forEach((lbl, i) => {
+    const x  = groupGap + i*(groupW + groupGap);
+    const h1 = data[i]/maxV*chartH;
+    const h2 = remit[i]/maxV*chartH;
+    out += '<rect x="' + x.toFixed(1) + '" y="' + (chartH-h1).toFixed(1) + '" width="' + bw + '" height="' + h1.toFixed(1) + '" rx="3" fill="#14B8A6" opacity="' + (i===5?'0.5':'0.85') + '"/>';
+    out += '<rect x="' + (x+bw+gap).toFixed(1) + '" y="' + (chartH-h2).toFixed(1) + '" width="' + bw + '" height="' + h2.toFixed(1) + '" rx="3" fill="#0A2540" opacity="' + (i===5?'0.5':'0.75') + '"/>';
+    out += '<text x="' + (x+bw+gap/2).toFixed(1) + '" y="' + (chartH+16).toFixed(1) + '" text-anchor="middle" font-size="10" fill="#6D7F95" font-family="Inter,sans-serif">' + lbl + '</text>';
+  });
+  out += '</g>';
+  svg.innerHTML = out;
+}
+
+// ════════════════════════════════════════ HST BY CLIENT
+function renderHSTByClient() {
+  const tbody = document.getElementById('hst-by-client');
+  if (!tbody) return;
+  tbody.innerHTML = CLIENTS.filter(c=>c.hst>0).map(c => {
+    const owing = Math.round(c.hst * 0.74);
+    return '<tr><td><div style="font-weight:500">' + c.name + '</div><div class="td-sub">' + c.industry + '</div></td>' +
+      '<td style="font-weight:600">$' + c.hst.toLocaleString() + '</td>' +
+      '<td style="font-weight:600;color:var(--red)">$' + owing.toLocaleString() + '</td>' +
+      '<td><span class="badge badge-gold badge-dot">Due Jun 30</span></td></tr>';
+  }).join('');
+}
+
+// ════════════════════════════════════════ SAGE HISTORY
+function renderSageHistory() {
+  const tbody = document.getElementById('sage-history');
+  if (!tbody) return;
+  tbody.innerHTML = SAGE_HISTORY.map(h =>
+    '<tr><td><span class="mono">' + h.posted + '</span></td><td>' + h.client + '</td><td>' + h.period + '</td>' +
+    '<td style="font-weight:600">' + h.entries + '</td><td style="font-weight:600">' + h.total + '</td>' +
+    '<td><span class="badge badge-green badge-dot">Posted</span></td>' +
+    '<td style="color:var(--t3)">' + h.by + '</td></tr>'
+  ).join('');
+}
+
+async function postToSage() {
+  if (!getToken()) {
+    showToast('Sending 31 entries to Sage 50 Posting Agent… (demo)', 'info');
+    setTimeout(() => showToast('✓ 31 entries posted to Sage 50 (demo mode)', 'success'), 3200);
+    return;
+  }
+  const accountNo = (document.getElementById('sage-account-no')?.value || '').trim();
+  const glBank    = (document.getElementById('sage-gl-bank')?.value || '').trim();
+  if (!accountNo || !glBank) {
+    showToast('Enter the account number (e.g. xxxx5443) and GL bank code (e.g. 1060) above', 'warning');
+    return;
+  }
+  showToast('Running dry-run posting preview…', 'info');
+  try {
+    const qs = new URLSearchParams({ account_no: accountNo, gl_bank: glBank });
+    const result = await apiFetch('/api/ops/post-entries?' + qs.toString(), { method: 'POST' });
+    const previewDiv = document.getElementById('post-preview-log');
+    const previewLog = document.getElementById('post-preview-lines');
+    if (previewDiv && previewLog) {
+      previewDiv.classList.add('visible');
+      previewLog.innerHTML = (result.lines || []).map(l => {
+        const cls = l.startsWith('BQ') || /entries|built|posted|balanced/i.test(l) ? 'ok'
+                  : l.startsWith('ERROR') || /error|fail/i.test(l) ? 'warn' : 'info';
+        return '<div class="log-line"><span class="' + cls + '">' + escHtml(l) + '</span></div>';
+      }).join('');
+    }
+    if (result.ok) {
+      showToast('Dry run complete — to post for real, run: python scripts/_post_je.py --account ' + accountNo + ' --gl-bank ' + glBank + ' --sai <path> --commit', 'success');
+    } else {
+      showToast('Dry run returned errors — check the preview log above', 'warning');
+    }
+  } catch (err) {
+    showToast('Post preview failed: ' + err.message, 'warning');
+  }
+}
+
+// ════════════════════════════════════════ CLIENTS LIST
+function renderClientsList() {
+  const list = document.getElementById('clients-list');
+  if (!list) return;
+  const isLive = !!getToken();
+  list.innerHTML = CLIENTS.map(c =>
+    '<div class="client-row">' +
+    '<div><div class="cr-name">' + c.name + '</div><div class="cr-sub">' + c.acct + ' · ' + c.bank + '</div></div>' +
+    '<div style="color:var(--t2);font-size:12px">' + c.industry + '</div>' +
+    '<div style="font-weight:600;color:' + (c.unrec>20?'var(--amber)':'var(--t1)') + '">' + (c.unrec||'—') + '</div>' +
+    '<div style="font-weight:600;color:' + (c.hst>5000?'var(--red)':'var(--t1)') + '">' + (c.hst?'$'+c.hst.toLocaleString():'—') + '</div>' +
+    '<div style="font-size:12px;color:var(--t2)">' + c.recon + '</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+    '<span class="badge ' + (c.stage==='onboarding'?'badge-gold badge-dot':c.stage==='review'?'badge-blue badge-dot':'badge-green badge-dot') + '">' +
+    (c.stage==='onboarding'?'Onboarding':c.stage==='review'?'Review':c.stage==='post'?'Post':'HST') + '</span>' +
+    '<button class="btn btn-secondary btn-sm" onclick="setClient(CLIENTS.find(x=>x.id===' + c.id + '));switchView(\'dashboard\')">Open</button>' +
+    (isLive && c.client_id ? '<button class="btn btn-danger btn-sm" onclick="archiveClient(\'' + c.client_id + '\')">Archive</button>' : '') +
+    '</div></div>'
+  ).join('');
+}
+
+// ════════════════════════════════════════ HST TOGGLE
+function setHSTMode(mode, btn) {
+  document.querySelectorAll('.hst-toggle button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  showToast(mode==='invoices'?'Switching to invoice-based HST tracking':'Switched to bank statement HST tracking','info');
+}
+
+// ════════════════════════════════════════ ONBOARDING
+function openOnboarding()  { document.getElementById('modal-onboarding').classList.add('open'); }
+function closeOnboarding() { document.getElementById('modal-onboarding').classList.remove('open'); }
+async function submitOnboarding(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const companyName  = (document.getElementById('ob-company-name')?.value || '').trim();
+  const accountNo    = (document.getElementById('ob-account-no')?.value || '').trim();
+  const glBankAcct   = (document.getElementById('ob-gl-bank')?.value || '').trim();
+  const senderEmail  = (document.getElementById('ob-sender-email')?.value || '').trim();
+  const bank         = document.getElementById('ob-bank')?.value || '';
+  const MONTH_NUM    = {January:1,February:2,March:3,April:4,May:5,June:6,July:7,August:8,September:9,October:10,November:11,December:12};
+  const yearEndMonth = MONTH_NUM[document.getElementById('ob-year-end')?.value] || 12;
+
+  if (!companyName) { showToast('Company name is required', 'warning'); return; }
+  if (!bank)        { showToast('Select a bank', 'warning'); return; }
+
+  const clientId = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '').slice(0, 30);
+
+  if (getToken()) {
+    try {
+      const qs = new URLSearchParams({
+        company_name: companyName,
+        client_id:    clientId,
+        account_no:   accountNo || '000000',
+        bank,
+        gl_bank_account: glBankAcct || '1060',
+        sender_email: senderEmail,
+        year_end_month: String(yearEndMonth),
+      });
+      const result = await apiFetch('/api/ops/onboard-client?' + qs.toString(), { method: 'POST' });
+      closeOnboarding();
+      if (result.ok) {
+        showToast('Client "' + companyName + '" added to registry (ID: ' + clientId + ')', 'success');
+        setTimeout(() => showToast('Run Gmail Watcher to activate statement detection', 'info'), 1400);
+        fetchLiveData();
+      } else if (result.manual) {
+        showToast('Registry not accessible from server — add manually to client_accounts.csv', 'warning');
+        setTimeout(() => showToast('Row: ' + result.row, 'info'), 1000);
+      } else {
+        showToast(result.error || 'Onboarding error', 'warning');
+      }
+    } catch (err) {
+      closeOnboarding();
+      showToast('Server error: ' + err.message, 'warning');
+    }
+  } else {
+    closeOnboarding();
+    showToast('Client "' + companyName + '" created (demo mode)', 'success');
+    setTimeout(() => showToast('Connect live data to persist to registry', 'info'), 1200);
+  }
+}
+
+// ════════════════════════════════════════ TOAST
+function showToast(msg, type) {
+  type = type || 'info';
+  const stack = document.getElementById('toast-stack');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.innerHTML = '<span class="t-icon"></span><span>' + msg + '</span>';
+  stack.appendChild(t);
+  setTimeout(() => { t.classList.add('fade-out'); setTimeout(() => t.remove(), 280); }, 3800);
+}
+
+// ════════════════════════════════════════ INIT
+buildClientDropdown();
+renderActivity();
+renderWatcherPreview();
+renderWatcherFull();
+renderDashEntries();
+renderEntriesTable();
+renderHSTChart();
+renderHSTByClient();
+renderSageHistory();
+renderClientsList();
+updateModeBanner();
+fetchLiveData();
+// Show sign-in overlay on first load when no token present
+if (!getToken()) {
+  showSignIn();
+} else {
+  loadUnposted();
+}
+</script>
+</body>
+</html>

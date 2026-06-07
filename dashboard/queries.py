@@ -151,3 +151,23 @@ def audit(limit: int = 50) -> list[dict[str, Any]]:
         LIMIT {limit}
     """
     return _rows(sql)
+
+
+def unposted(client_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    """Approval queue items with status=APPROVED — ready to post to Sage 50."""
+    limit = max(1, min(int(limit), 1000))
+    where = "status = 'APPROVED'"
+    params: list = []
+    if client_id:
+        where += " AND client_id = @client_id"
+        params.append(bigquery.ScalarQueryParameter("client_id", "STRING", client_id))
+    sql = f"""
+        SELECT queue_id, period, txn_date, description, amount,
+               gl_account_no, confidence, account_no, client_id,
+               final_gl_no, reviewer_email, reviewed_at
+        FROM `{_ACC}.approval_queue`
+        WHERE {where}
+        ORDER BY txn_date DESC
+        LIMIT {limit}
+    """
+    return _rows(sql, params)
