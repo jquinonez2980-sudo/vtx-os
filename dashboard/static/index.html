@@ -93,6 +93,42 @@
       transition: all 160ms var(--ease);
     }
     .hst-toggle button.active { background: var(--card); color: var(--t1); box-shadow: 0 1px 3px rgba(10,37,64,0.08); }
+    /* Upload drop zone */
+    .upload-zone {
+      border: 2px dashed var(--card-border); border-radius: 10px;
+      padding: 24px 16px; text-align: center; cursor: pointer;
+      transition: all 180ms var(--ease); background: var(--page-bg);
+    }
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: var(--teal); background: var(--teal-soft);
+    }
+    .upload-zone svg { width: 28px; height: 28px; color: var(--t4); margin: 0 auto 10px; display: block; }
+    .hst-file-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; background: var(--page-bg);
+      border: 1px solid var(--card-border); border-radius: 6px;
+      margin-top: 6px; font: 400 12px/1.3 'Inter', sans-serif;
+    }
+    .hst-file-item .fi-name { flex: 1; color: var(--t2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hst-file-item .fi-size { color: var(--t4); font-size: 11px; flex-shrink: 0; }
+    .hst-file-item .fi-rm  { color: var(--t4); cursor: pointer; font-size: 14px; line-height: 1; flex-shrink: 0; }
+    .hst-file-item .fi-rm:hover { color: var(--red); }
+    /* Google OAuth button */
+    .btn-google {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 9px 16px; background: #fff; border: 1px solid #DADCE0;
+      border-radius: 8px; font: 500 13px/1 'Inter', sans-serif;
+      color: #3C4043; cursor: pointer; transition: box-shadow 140ms;
+    }
+    .btn-google:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+    /* Period info tooltip */
+    .period-note {
+      display: inline-flex; align-items: center; gap: 5px;
+      font: 400 11px/1.4 'Inter', sans-serif; color: var(--t3);
+      padding: 4px 8px; background: var(--gold-soft);
+      border-radius: 4px; border: 1px solid var(--gold-100);
+      margin-bottom: 8px;
+    }
     /* sign-in overlay */
     .signin-overlay {
       position: fixed; inset: 0; background: rgba(10,37,64,0.6);
@@ -445,14 +481,14 @@
         <div><div class="ch-title">Bank Configuration</div><div class="ch-sub">Select which banks to scan for statements</div></div>
       </div>
       <div class="bank-chips" id="bank-chips">
-        <div class="bank-chip selected" onclick="toggleBank(this)">RBC</div>
-        <div class="bank-chip selected" onclick="toggleBank(this)">TD Bank</div>
-        <div class="bank-chip selected" onclick="toggleBank(this)">American Express</div>
-        <div class="bank-chip" onclick="toggleBank(this)">BMO</div>
+        <div class="bank-chip" onclick="toggleBank(this)">RBC</div>
+        <div class="bank-chip" onclick="toggleBank(this)">TD Bank</div>
         <div class="bank-chip" onclick="toggleBank(this)">Scotiabank</div>
         <div class="bank-chip" onclick="toggleBank(this)">CIBC</div>
+        <div class="bank-chip" onclick="toggleBank(this)">BMO</div>
         <div class="bank-chip" onclick="toggleBank(this)">National Bank</div>
         <div class="bank-chip" onclick="toggleBank(this)">Desjardins</div>
+        <div class="bank-chip" onclick="toggleBank(this)">American Express</div>
       </div>
       <div style="padding:14px 20px;display:flex;gap:14px">
         <div style="flex:1">
@@ -503,7 +539,7 @@
     <div class="view-header">
       <div class="vh-left">
         <div class="vh-title">Review Journal Entries</div>
-        <div class="vh-sub">BigQuery AI-generated entries awaiting approval</div>
+        <div class="vh-sub">AI-generated entries awaiting approval · bookkeeping period</div>
       </div>
       <div class="vh-actions">
         <div class="month-picker">
@@ -514,6 +550,12 @@
         <select class="select-ctrl" style="width:200px" onchange="filterEntriesByClient(this.value)" id="entries-client-filter">
           <option value="all">All Clients</option>
         </select>
+      </div>
+    </div>
+    <div style="padding:6px 20px 0">
+      <div class="period-note" id="entries-period-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Showing entries processed in <strong id="entries-period-note-month">April 2026</strong>. Transaction dates may be from earlier months (actual bank dates).
       </div>
     </div>
 
@@ -542,43 +584,105 @@
   <div class="view" id="view-hst">
     <div class="view-header">
       <div class="vh-left">
-        <div class="vh-title">HST / Tax Tracker</div>
-        <div class="vh-sub">GST/HST tracking and remittance overview — Ontario</div>
+        <div class="vh-title">HST / GST Tracker</div>
+        <div class="vh-sub">Ontario GST/HST remittance — <span id="hst-period-display">April 2026</span></div>
       </div>
       <div class="vh-actions">
         <div class="hst-toggle">
-          <button class="active" onclick="setHSTMode('bank',this)">Bank Statements</button>
-          <button onclick="setHSTMode('invoices',this)">Invoices (Drop Folder)</button>
+          <button class="active" id="hst-mode-bank" onclick="setHSTMode('bank',this)">Bank-Based</button>
+          <button id="hst-mode-invoices" onclick="setHSTMode('invoices',this)">Invoice Upload</button>
         </div>
         <div class="month-picker">
           <button onclick="changeMonth(-1)">‹</button>
           <span id="hst-month-label">April 2026</span>
           <button onclick="changeMonth(1)">›</button>
         </div>
+        <button class="btn btn-teal" id="hst-run-btn" onclick="triggerHSTAgent()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Prepare HST Return
+        </button>
       </div>
     </div>
 
-    <div class="three-col">
+    <!-- KPI cards — IDs allow live updates -->
+    <div class="three-col" style="margin-bottom:16px">
       <div class="kpi" style="--kpi-color:#0F9A6C;--kpi-soft:#EAFAF4">
         <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
-        <div class="kpi-val">$12,430</div>
-        <div class="kpi-label">HST Collected (Jun)</div>
-        <span class="kpi-delta good">↑ 8% vs May</span>
+        <div class="kpi-val" id="hst-kpi-collected">—</div>
+        <div class="kpi-label">HST Collected</div>
+        <span class="kpi-delta" id="hst-kpi-collected-note" style="color:var(--t3)">Awaiting data</span>
       </div>
       <div class="kpi" style="--kpi-color:#C8393B;--kpi-soft:#FEF2F2">
         <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
-        <div class="kpi-val">$9,200</div>
-        <div class="kpi-label">Remittable (Net)</div>
-        <span class="kpi-delta warn">Due Jun 30</span>
+        <div class="kpi-val" id="hst-kpi-remittable">—</div>
+        <div class="kpi-label">Net Remittable</div>
+        <span class="kpi-delta warn" id="hst-kpi-due">—</span>
       </div>
       <div class="kpi" style="--kpi-color:#2563EB;--kpi-soft:#EFF6FF">
         <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
-        <div class="kpi-val">14 days</div>
-        <div class="kpi-label">Until Filing Deadline</div>
-        <span class="kpi-delta warn">Jun 30, 2026</span>
+        <div class="kpi-val" id="hst-kpi-deadline">—</div>
+        <div class="kpi-label">Filing Deadline</div>
+        <span class="kpi-delta" id="hst-kpi-days">— days left</span>
       </div>
     </div>
 
+    <div class="two-col">
+      <!-- Left: By-Client table -->
+      <div class="card">
+        <div class="card-head">
+          <div><div class="ch-title">By Client — <span id="hst-by-client-period">April 2026</span></div><div class="ch-sub">Estimated from bank transactions · 15% HST rate</div></div>
+          <button class="btn btn-ghost btn-sm" onclick="fetchLiveHST(currentPeriod)">↻ Refresh</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Client</th><th>Gross Sales Est.</th><th>HST Collected</th><th>Net Remittable</th><th>Status</th></tr></thead>
+            <tbody id="hst-by-client"></tbody>
+          </table>
+        </div>
+        <div style="padding:10px 16px;border-top:1px solid var(--card-border)">
+          <div class="period-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            HST figures are estimated from categorized transactions. Run HST agent for CRA-ready computation.
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Upload + Agent trigger -->
+      <div class="card">
+        <div class="card-head"><div><div class="ch-title">HST Documents</div><div class="ch-sub">Upload invoices, receipts, bank statements</div></div></div>
+        <div class="card-body">
+          <div class="upload-zone" id="hst-upload-zone"
+               ondragover="event.preventDefault(); this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleHSTDrop(event)"
+               onclick="document.getElementById('hst-file-input').click()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div style="font:500 13px/1 'Inter',sans-serif;color:var(--t2);margin-bottom:4px">Drop HST documents here</div>
+            <div style="font:400 12px/1.4 'Inter',sans-serif;color:var(--t3)">PDF invoices · CSV exports · Excel receipts</div>
+            <div style="font:400 11px/1 'Inter',sans-serif;color:var(--t4);margin-top:6px">or click to browse</div>
+          </div>
+          <input type="file" id="hst-file-input" multiple accept=".pdf,.csv,.xlsx,.xls" style="display:none" onchange="handleHSTFileSelect(this.files)">
+          <div id="hst-file-list" style="margin-top:6px"></div>
+
+          <div style="border-top:1px solid var(--card-border);margin-top:14px;padding-top:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div>
+                <div style="font:500 13px/1 'Inter',sans-serif;color:var(--t1)">HST Preparation Agent</div>
+                <div style="font:400 12px/1.4 'Inter',sans-serif;color:var(--t3);margin-top:3px">AI-powered return from categorized bank transactions</div>
+              </div>
+              <span class="badge badge-navy" id="hst-agent-status">Ready</span>
+            </div>
+            <div class="progress-log" id="hst-agent-log" style="max-height:130px;overflow-y:auto;margin-bottom:10px;display:none"></div>
+            <button class="btn btn-teal" style="width:100%" onclick="triggerHSTAgent()" id="hst-agent-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Prepare Return — <span id="hst-agent-period">April 2026</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trend chart + filing info -->
     <div class="two-col">
       <div class="card">
         <div class="card-head">
@@ -588,18 +692,20 @@
             <span style="display:flex;align-items:center;gap:5px"><span style="background:#0A2540;width:10px;height:10px;border-radius:2px;display:inline-block"></span>Remittable</span>
           </div>
         </div>
-        <div class="card-body">
-          <svg id="hst-chart" viewBox="0 0 460 180" width="100%" style="display:block"></svg>
-        </div>
+        <div class="card-body"><svg id="hst-chart" viewBox="0 0 460 180" width="100%" style="display:block"></svg></div>
       </div>
-
       <div class="card">
-        <div class="card-head"><div class="ch-title">By Client — June</div></div>
-        <div class="tbl-wrap">
-          <table>
-            <thead><tr><th>Client</th><th>Collected</th><th>Owing</th><th>Status</th></tr></thead>
-            <tbody id="hst-by-client"></tbody>
-          </table>
+        <div class="card-head"><div class="ch-title">Ontario HST Filing Guide</div></div>
+        <div class="card-body">
+          <div style="font:400 13px/1.7 'Inter',sans-serif;color:var(--t2)">
+            <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--t3)">HST Rate (Ontario)</span><strong>13%</strong></div>
+            <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--t3)">Federal (GST)</span><strong>5%</strong></div>
+            <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--t3)">Provincial (PST)</span><strong>8%</strong></div>
+            <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--t3)">Filing Frequency</span><strong id="hst-guide-freq">Quarterly</strong></div>
+            <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--t3)">Next Deadline</span><strong id="hst-guide-deadline">—</strong></div>
+            <div style="display:flex;justify-content:space-between;padding:8px 0"><span style="color:var(--t3)">CRA Form</span><strong>GST34</strong></div>
+          </div>
+          <a href="https://www.canada.ca/en/revenue-agency/services/forms-publications/forms/gst34.html" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="margin-top:12px;display:inline-block">Open GST34 Form →</a>
         </div>
       </div>
     </div>
@@ -719,6 +825,29 @@
       </div>
     </div>
 
+    <!-- Display Name -->
+    <div class="card" style="max-width:560px;margin-bottom:16px">
+      <div class="card-head"><div><div class="ch-title">Your Profile</div><div class="ch-sub">How you appear in the dashboard</div></div></div>
+      <div class="card-body">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font:600 18px/1 'Inter',sans-serif" id="settings-avatar-preview">JQ</div>
+          <div>
+            <div style="font:500 14px/1 'Inter',sans-serif;color:var(--t1)" id="settings-name-preview">Admin</div>
+            <div style="font:400 12px/1 'Inter',sans-serif;color:var(--t3);margin-top:4px" id="settings-email-display"></div>
+          </div>
+        </div>
+        <div style="margin-bottom:14px">
+          <label class="field-label">Display Name</label>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <input class="input" type="text" id="settings-display-name" placeholder="e.g. Jorge Quinonez">
+            <button class="btn btn-secondary" onclick="saveDisplayName()" style="flex-shrink:0">Save</button>
+          </div>
+          <div class="field-hint">Shown in the sidebar and header. Stored locally in your browser.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Connection -->
     <div class="card" style="max-width:560px;margin-bottom:16px">
       <div class="card-head">
         <div>
@@ -739,6 +868,34 @@
         <div style="display:flex;gap:8px">
           <button class="btn btn-secondary btn-sm" onclick="signOut()">Sign Out</button>
           <button class="btn btn-ghost btn-sm" onclick="testConnection()">Test Connection</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gmail Integration -->
+    <div class="card" style="max-width:560px;margin-bottom:16px">
+      <div class="card-head">
+        <div><div class="ch-title">Gmail Integration</div><div class="ch-sub">Authorize AcumenAI to scan your inbox for bank statements</div></div>
+        <div id="gmail-status-badge"><span class="badge badge-gold badge-dot">Not checked</span></div>
+      </div>
+      <div class="card-body">
+        <div style="font:400 13px/1.7 'Inter',sans-serif;color:var(--t2);margin-bottom:14px">
+          AcumenAI's Gmail Watcher automatically detects bank statement emails and routes them through the extraction pipeline. OAuth access is stored locally — never shared.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn-google" onclick="connectGmail()">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Connect Google Account
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="checkGmailStatus()">↻ Check Status</button>
+        </div>
+        <div id="gmail-auth-instructions" style="display:none;margin-top:8px;padding:12px 14px;background:var(--page-bg);border:1px solid var(--card-border);border-radius:8px;font:400 12px/1.7 'Inter',sans-serif;color:var(--t2)">
+          <strong style="color:var(--t1);display:block;margin-bottom:6px">How to connect Gmail</strong>
+          <div>1. Open a terminal in your AcumenAI project directory</div>
+          <div>2. Run: <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--surface-2);padding:2px 5px;border-radius:3px">python scripts/gmail_auth.py</code></div>
+          <div>3. Follow the browser prompts to authorize Gmail access</div>
+          <div>4. Click <strong>Check Status</strong> above once complete</div>
+          <div style="margin-top:6px;color:var(--t3)">This grants read-only Gmail access to detect bank statement emails. Credentials are stored in your local Secret Manager or config folder.</div>
         </div>
       </div>
     </div>
@@ -907,12 +1064,14 @@ async function fetchLiveForAccount(accountNo, period) {
 
   const acctParam   = accountNo ? '&account_no=' + encodeURIComponent(accountNo) : '';
   const clientParam = accountNo ? '&client='     + encodeURIComponent(accountNo) : '';
+  // Include period filter when a period is explicitly given — prevents cross-period data leaks
+  const periodParam = period ? '&period=' + encodeURIComponent(period) : '';
 
   try {
     // Fetch clients, approvals, and audit in parallel
     const [clientsData, approvals, auditRows] = await Promise.all([
       apiFetch('/api/live/clients'),
-      apiFetch('/api/live/approvals?limit=1000' + acctParam),
+      apiFetch('/api/live/approvals?limit=1000' + acctParam + periodParam),
       apiFetch('/api/live/audit?limit=8'),
     ]);
 
@@ -975,12 +1134,14 @@ async function fetchLiveForAccount(accountNo, period) {
           status:    'pending',
           queue_id:  a.queue_id,
           account_no: a.account_no,
+          period:    a.period || '',
         });
       });
       renderEntriesTable();
       renderDashEntries();
-      // Auto-set the period picker to the most recent period found in BQ (unfiltered load only)
-      if (!accountNo && approvals.length > 0) {
+      // Auto-detect period from the most recent approval (only on initial load without explicit period).
+      // After detection, re-fetch with the detected period so entries are scoped correctly.
+      if (!period && approvals.length > 0) {
         const recent = approvals.map(a => a.period).filter(Boolean).sort().reverse()[0];
         if (recent && recent !== currentPeriod) {
           currentPeriod = recent;
@@ -989,8 +1150,13 @@ async function fetchLiveForAccount(accountNo, period) {
           ['dash-month-label','entries-month-label','hst-month-label'].forEach(id => {
             const el = document.getElementById(id); if (el) el.textContent = fmtMonth();
           });
+          updatePeriodNotes();
+          // Re-fetch with detected period so entries are properly filtered
+          fetchLiveForAccount(accountNo, recent);
+          return;
         }
       }
+      updatePeriodNotes();
     }
 
     // Update activity — only real audit events
@@ -1016,17 +1182,17 @@ async function fetchLiveForAccount(accountNo, period) {
       apiFetch('/api/live/summary?period=' + period + clientParam).catch(() => {});
     }
 
-    // Update authenticated user identity (sidebar + header)
+    // Update authenticated user identity — localStorage name takes priority over server-derived name
+    const savedName = getDisplayName();
+    if (savedName) {
+      applyUserIdentity(savedName, null);
+    }
     apiFetch('/api/live/user').then(u => {
       if (!u || !u.email) return;
-      const name = u.name || (u.email ? u.email.split('@')[0] : 'Admin');
-      const parts = name.trim().split(/\s+/);
-      const initials = (parts.length > 1 ? parts.map(p => p[0]).join('') : name).toUpperCase().slice(0, 2) || 'AD';
-      const sbAv = document.getElementById('sb-user-avatar'); if (sbAv) sbAv.textContent = initials;
-      const sbNm = document.getElementById('sb-user-name');   if (sbNm) sbNm.textContent = name;
-      const sbRl = document.getElementById('sb-user-role');   if (sbRl) sbRl.textContent = u.email;
-      const hAv  = document.getElementById('h-avatar');       if (hAv)  { hAv.textContent = initials; hAv.title = name; }
-    }).catch(() => {});
+      const serverName = u.name || (u.email ? u.email.split('@')[0] : 'Admin');
+      // Only use server name if no saved display name
+      applyUserIdentity(savedName || serverName, u.email);
+    }).catch(() => { if (savedName) applyUserIdentity(savedName, null); });
 
     // Watcher + Sage history: show "run to populate" placeholders (no mock data in live mode)
     const emptyWatcherPreview = '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
@@ -1180,7 +1346,7 @@ function buildClientDropdown() {
   CLIENTS.forEach(c => {
     const d = document.createElement('div');
     d.className = 'dd-item' + (c.id === currentClient.id ? ' active' : '');
-    d.innerHTML = '<span class="di-dot" style="background:' + c.color + '"></span><div><div class="di-name">' + c.name + '</div><div class="di-industry">' + c.industry + '</div></div>';
+    d.innerHTML = '<span class="di-dot" style="background:' + c.color + '"></span><div style="flex:1;min-width:0"><div class="di-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(c.name) + '</div><div class="di-industry">' + escHtml(c.industry || c.bank || '—') + (c.account_masked ? ' · <span style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + escHtml(c.account_masked) + '</span>' : '') + '</div></div>';
     d.onclick = () => setClient(c);
     list.appendChild(d);
   });
@@ -1293,7 +1459,12 @@ function changeMonth(dir) {
     const el = document.getElementById(id);
     if (el) el.textContent = fmtMonth();
   });
-  if (getToken()) fetchLiveForAccount(currentClient?.client_id, currentPeriod);
+  updatePeriodNotes();
+  if (getToken()) {
+    const acct = currentClient?.account_masked || currentClient?.client_id || null;
+    fetchLiveForAccount(acct, currentPeriod);
+    fetchLiveHST(currentPeriod);
+  }
 }
 
 // ════════════════════════════════════════ ENTRIES TABLE
@@ -1806,10 +1977,23 @@ let _liveHSTRows = [];
 
 async function fetchLiveHST(period) {
   if (!getToken()) return;
+  updatePeriodNotes(); // Refresh deadline / period labels regardless of data
   try {
     const rows = await apiFetch('/api/live/hst?period=' + encodeURIComponent(period));
     if (Array.isArray(rows)) {
       _liveHSTRows = rows;
+      // Compute totals for KPI cards
+      let totalCollected = 0, totalOwing = 0;
+      rows.forEach(r => {
+        totalCollected += parseFloat(r.hst_collected || r.amount || 0);
+        totalOwing     += parseFloat(r.hst_owing || r.net_hst || 0);
+      });
+      if (rows.length > 0) {
+        const fmt = v => '$' + Math.abs(v).toLocaleString('en', { minimumFractionDigits: 2 });
+        const el1 = document.getElementById('hst-kpi-collected'); if (el1) el1.textContent = fmt(totalCollected);
+        const el2 = document.getElementById('hst-kpi-remittable'); if (el2) el2.textContent = fmt(totalOwing || totalCollected * 0.74);
+        const note = document.getElementById('hst-kpi-collected-note'); if (note) note.textContent = rows.length + ' line' + (rows.length > 1 ? 's' : '') + ' from BQ';
+      }
       renderHSTByClient();
     }
   } catch (_) {}
@@ -1923,7 +2107,172 @@ function renderClientsList() {
 function setHSTMode(mode, btn) {
   document.querySelectorAll('.hst-toggle button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  showToast(mode==='invoices'?'Switching to invoice-based HST tracking':'Switched to bank statement HST tracking','info');
+  const uploadZone = document.getElementById('hst-upload-zone');
+  const fileInput  = document.getElementById('hst-file-input');
+  if (uploadZone) uploadZone.style.opacity = mode === 'invoices' ? '1' : '0.5';
+  if (fileInput)  fileInput.disabled = mode !== 'invoices';
+  showToast(mode === 'invoices' ? 'Invoice mode — upload files to process HST' : 'Bank-based mode — HST estimated from transactions', 'info');
+}
+
+// ════════════════════════════════════════ HST AGENT + FILE UPLOAD
+let _hstFiles = [];
+
+async function triggerHSTAgent() {
+  const btn = document.getElementById('hst-agent-btn');
+  const log = document.getElementById('hst-agent-log');
+  const statusBadge = document.getElementById('hst-agent-status');
+  if (btn) { btn.disabled = true; }
+  if (statusBadge) statusBadge.innerHTML = '<span class="badge badge-gold badge-dot">Running…</span>';
+  if (log) { log.style.display = 'block'; log.innerHTML = ''; appendLogLine(log, '[HST Agent] Starting preparation for ' + currentPeriod + '…', 'info'); }
+  if (!getToken()) {
+    await new Promise(r => setTimeout(r, 800));
+    if (log) appendLogLine(log, '⚠ Demo mode — connect live data to run HST agent', 'warn');
+    if (statusBadge) statusBadge.innerHTML = '<span class="badge badge-gold badge-dot">Demo</span>';
+    if (btn) btn.disabled = false;
+    showToast('Demo mode — connect live data to trigger HST agent', 'warning');
+    return;
+  }
+  try {
+    const acct = currentClient?.account_masked || currentClient?.client_id || null;
+    const qs = new URLSearchParams({ period: currentPeriod });
+    if (acct) qs.set('client', acct);
+    const result = await apiFetch('/api/ops/run-hst?' + qs.toString(), { method: 'POST' });
+    if (log) {
+      (result.lines || [result.message || 'Agent completed']).forEach(l => {
+        const cls = l.includes('✓') || /ok|success|complete/i.test(l) ? 'ok'
+                  : l.includes('⚠') || /error|fail|warn/i.test(l) ? 'warn' : 'info';
+        appendLogLine(log, l, cls);
+      });
+    }
+    if (statusBadge) statusBadge.innerHTML = result.ok ? '<span class="badge badge-green badge-dot">Done</span>' : '<span class="badge badge-gold badge-dot">Check log</span>';
+    if (result.ok || result.lines) {
+      showToast('HST agent completed — refreshing data', 'success');
+      setTimeout(() => fetchLiveHST(currentPeriod), 1000);
+    }
+  } catch (err) {
+    if (log) appendLogLine(log, 'ERROR: ' + err.message, 'warn');
+    if (statusBadge) statusBadge.innerHTML = '<span class="badge badge-red badge-dot">Error</span>';
+    showToast('HST agent error: ' + err.message, 'warning');
+  }
+  if (btn) btn.disabled = false;
+}
+
+function handleHSTDrop(e) {
+  e.preventDefault();
+  document.getElementById('hst-upload-zone')?.classList.remove('drag-over');
+  handleHSTFileSelect(e.dataTransfer?.files);
+}
+
+function handleHSTFileSelect(files) {
+  if (!files || !files.length) return;
+  Array.from(files).forEach(f => { if (!_hstFiles.find(x => x.name === f.name)) _hstFiles.push(f); });
+  renderHSTFileList();
+  showToast(files.length + ' file' + (files.length > 1 ? 's' : '') + ' added — click Prepare HST Return to process', 'info');
+}
+
+function renderHSTFileList() {
+  const list = document.getElementById('hst-file-list');
+  if (!list) return;
+  list.innerHTML = _hstFiles.map((f, i) => {
+    const kb = (f.size / 1024).toFixed(0);
+    return '<div class="hst-file-item"><span class="fi-name" title="' + escHtml(f.name) + '">' + escHtml(f.name) + '</span><span class="fi-size">' + kb + ' KB</span><span class="fi-rm" onclick="removeHSTFile(' + i + ')">✕</span></div>';
+  }).join('');
+}
+
+function removeHSTFile(i) {
+  _hstFiles.splice(i, 1);
+  renderHSTFileList();
+}
+
+// ════════════════════════════════════════ PERIOD NOTES
+function updatePeriodNotes() {
+  const lbl = fmtMonth();
+  const el1 = document.getElementById('entries-period-note-month'); if (el1) el1.textContent = lbl;
+  const el2 = document.getElementById('hst-period-display');        if (el2) el2.textContent = lbl;
+  const el3 = document.getElementById('hst-by-client-period');      if (el3) el3.textContent = lbl;
+  const el4 = document.getElementById('hst-agent-period');          if (el4) el4.textContent = lbl;
+  // HST filing deadline: Ontario quarterly = last day of month following quarter end
+  const y = currentMonth.y, m = currentMonth.m; // 0-indexed month
+  const quarterEnd = Math.ceil((m + 1) / 3) * 3 - 1; // 0-indexed last month of quarter
+  const deadlineDate = new Date(y, quarterEnd + 2, 0); // last day of month after quarter end
+  const deadlineStr = deadlineDate.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' });
+  const daysLeft = Math.ceil((deadlineDate - new Date()) / 86400000);
+  const el5 = document.getElementById('hst-kpi-deadline');   if (el5) el5.textContent = deadlineStr;
+  const el6 = document.getElementById('hst-kpi-days');       if (el6) el6.textContent = daysLeft > 0 ? daysLeft + ' days left' : 'Overdue';
+  const el7 = document.getElementById('hst-kpi-due');        if (el7) el7.textContent = 'Due ' + deadlineStr;
+  const el8 = document.getElementById('hst-guide-deadline'); if (el8) el8.textContent = deadlineStr;
+}
+
+// ════════════════════════════════════════ GMAIL OAUTH
+async function checkGmailStatus() {
+  if (!getToken()) { showToast('Sign in first to check Gmail status', 'warning'); return; }
+  try {
+    const s = await apiFetch('/api/auth/gmail-status');
+    const badge = document.getElementById('gmail-status-badge');
+    if (badge) badge.innerHTML = s.connected
+      ? '<span class="badge badge-green badge-dot">Connected</span>'
+      : '<span class="badge badge-red badge-dot">Not connected</span>';
+    if (s.connected) {
+      showToast('Gmail is connected (' + s.source + ')', 'success');
+    } else {
+      showToast('Gmail not connected — see instructions below', 'warning');
+      const instr = document.getElementById('gmail-auth-instructions');
+      if (instr) instr.style.display = 'block';
+    }
+  } catch (err) {
+    showToast('Could not check Gmail status: ' + err.message, 'warning');
+  }
+}
+
+function connectGmail() {
+  const instr = document.getElementById('gmail-auth-instructions');
+  if (instr) { instr.style.display = instr.style.display === 'none' ? 'block' : 'none'; }
+  showToast('Follow the steps below to authorize Gmail access', 'info');
+}
+
+// ════════════════════════════════════════ DISPLAY NAME
+function getDisplayName() { return localStorage.getItem('acumen_display_name') || null; }
+
+function saveDisplayName() {
+  const val = (document.getElementById('settings-display-name')?.value || '').trim();
+  if (!val) { showToast('Enter a display name first', 'warning'); return; }
+  localStorage.setItem('acumen_display_name', val);
+  applyUserIdentity(val, null);
+  // Update settings preview
+  const prev = document.getElementById('settings-name-preview'); if (prev) prev.textContent = val;
+  const avPrev = document.getElementById('settings-avatar-preview');
+  if (avPrev) {
+    const parts = val.split(/\s+/);
+    avPrev.textContent = (parts.length > 1 ? parts.map(p => p[0]).join('') : val.slice(0, 2)).toUpperCase().slice(0, 2);
+  }
+  showToast('Display name saved', 'success');
+}
+
+function applyUserIdentity(name, email) {
+  if (name) {
+    const parts = name.trim().split(/\s+/);
+    const initials = (parts.length > 1 ? parts.map(p => p[0]).join('') : name.slice(0, 2)).toUpperCase().slice(0, 2);
+    const sbAv = document.getElementById('sb-user-avatar'); if (sbAv) sbAv.textContent = initials;
+    const sbNm = document.getElementById('sb-user-name');   if (sbNm) sbNm.textContent = name;
+    const hAv  = document.getElementById('h-avatar');       if (hAv)  { hAv.textContent = initials; hAv.title = name; }
+    const settPrev = document.getElementById('settings-name-preview'); if (settPrev) settPrev.textContent = name;
+    const avPrev = document.getElementById('settings-avatar-preview'); if (avPrev) avPrev.textContent = initials;
+    // Pre-fill settings input if empty
+    const inp = document.getElementById('settings-display-name'); if (inp && !inp.value) inp.value = name;
+  }
+  if (email) {
+    const sbRl = document.getElementById('sb-user-role');        if (sbRl) sbRl.textContent = email;
+    const emailEl = document.getElementById('settings-email-display'); if (emailEl) emailEl.textContent = email;
+  }
+}
+
+function testConnection() {
+  if (!getToken()) { showToast('No access key saved', 'warning'); return; }
+  apiFetch('/api/live/user').then(u => {
+    showToast('Connection OK — ' + (u.email || 'authenticated'), 'success');
+  }).catch(err => {
+    showToast('Connection failed: ' + err.message, 'warning');
+  });
 }
 
 // ════════════════════════════════════════ ONBOARDING
@@ -1993,10 +2342,17 @@ function showToast(msg, type) {
 buildClientDropdown();
 renderHSTChart();
 updateModeBanner();
-// Sync month labels to currentPeriod state
+// Sync month labels and period notes to currentPeriod state
 ['dash-month-label','entries-month-label','hst-month-label'].forEach(id => {
   const el = document.getElementById(id); if (el) el.textContent = fmtMonth();
 });
+updatePeriodNotes();
+// Apply saved display name immediately (before any API calls)
+const _savedName = getDisplayName();
+if (_savedName) applyUserIdentity(_savedName, null);
+// Pre-fill settings display name input
+const _dnInp = document.getElementById('settings-display-name');
+if (_dnInp && _savedName) _dnInp.value = _savedName;
 if (!getToken()) {
   // Demo mode: render all views from mock constants only — no BQ calls
   renderActivity();

@@ -241,12 +241,13 @@ def live_audit(limit: int = 50, _user: dict = Depends(require_user)) -> list[dic
 
 @app.get("/api/live/approvals")
 def live_approvals(
-    limit: int = 100,
+    limit: int = 500,
     account_no: str | None = None,
+    period: str | None = None,
     _user: dict = Depends(require_user),
 ) -> list[dict[str, Any]]:
     from core.approval_queue import get_pending
-    items = get_pending(limit=limit, account_no=account_no)
+    items = get_pending(limit=limit, account_no=account_no, period=period)
     return [it.model_dump(mode="json") for it in items]
 
 
@@ -420,6 +421,64 @@ def ops_restore_client(
     ))
     job.result()
     return {"ok": True, "account_no": account_no, "rows_restored": job.num_dml_affected_rows}
+
+
+@app.get("/api/auth/gmail-status")
+def gmail_auth_status(_user: dict = Depends(require_user)) -> dict[str, Any]:
+    """Check whether Gmail OAuth credentials are stored in Secret Manager or locally."""
+    # Check Secret Manager first
+    try:
+        from core.secrets import get_secret
+        val = get_secret("vtx-gmail-oauth-credentials")
+        if val and len(val) > 10:
+            return {"connected": True, "source": "secret_manager"}
+    except Exception:
+        pass
+    # Check local config file
+    local = pathlib.Path(__file__).parent.parent / "config" / "gmail_credentials.json"
+    if local.exists():
+        return {"connected": True, "source": "local_file"}
+    return {"connected": False, "source": "none",
+            "hint": "Run: python scripts/gmail_auth.py — then re-check status"}
+
+
+@app.post("/api/ops/run-hst")
+def ops_run_hst(
+    client: str | None = None,
+    period: str | None = None,
+    _user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Trigger PrepareHSTReturnAgent via the orchestrator for a client/period."""
+    import subprocess
+    import sys
+    _ROOT = pathlib.Path(__file__).parent.parent
+    script = _ROOT / "scripts" / "_run_hst.py"
+    if not script.exists():
+        return {
+            "ok": False,
+            "lines": [
+                "HST agent script not found at scripts/_run_hst.py.",
+                "Run locally: python -c \"from agents.prepare_hst_return import PrepareHSTReturnAgent; ...\"",
+                f"Or query BQ directly: SELECT * FROM vtx_accounting.hst_returns WHERE return_period = '{period or 'YYYY-MM'}'",
+            ],
+            "hint": "The HST agent requires Vertex AI + BQ access. Run from the project root.",
+        }
+    args = [sys.executable, str(script)]
+    if client:
+        args += ["--client", client]
+    if period:
+        args += ["--period", period]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=120,
+            cwd=str(_ROOT), env={**os.environ, "PYTHONUTF8": "1"},
+        )
+        lines = [l for l in (result.stdout + "\n" + result.stderr).splitlines() if l.strip()]
+        return {"ok": result.returncode == 0, "lines": lines, "code": result.returncode}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "lines": ["ERROR: HST agent timed out after 120s"], "code": -1}
+    except Exception as exc:
+        return {"ok": False, "lines": [f"ERROR: {exc}"], "code": -1}
 
 
 @app.post("/api/ops/onboard-client")

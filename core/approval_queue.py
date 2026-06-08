@@ -71,13 +71,24 @@ def submit(
 # Read
 # ---------------------------------------------------------------------------
 
-def get_pending(limit: int = 100, account_no: str | None = None) -> list[ApprovalItem]:
-    """Return PENDING items ordered by date ascending (oldest first)."""
+def get_pending(
+    limit: int = 100,
+    account_no: str | None = None,
+    period: str | None = None,
+) -> list[ApprovalItem]:
+    """Return PENDING items ordered by date ascending (oldest first).
+
+    period: bookkeeping period string 'YYYY-MM' — filters by the period field
+    (the month the statement was ingested), not txn_date (the actual transaction date).
+    """
     where = "status = 'PENDING'"
     params: list[bigquery.ScalarQueryParameter] = []
     if account_no:
         where += " AND account_no = @account_no"
         params.append(bigquery.ScalarQueryParameter("account_no", "STRING", account_no))
+    if period:
+        where += " AND period = @period"
+        params.append(bigquery.ScalarQueryParameter("period", "STRING", period))
     query = f"""
         SELECT * EXCEPT (_loaded_at, _session_id)
         FROM `{TABLE_ID}`
