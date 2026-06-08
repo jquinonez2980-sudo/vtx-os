@@ -394,7 +394,7 @@
         <div style="display:flex;gap:8px;align-items:center">
           <div class="month-picker" id="dash-month-picker">
             <button onclick="changeMonth(-1)">‹</button>
-            <span id="dash-month-label">June 2026</span>
+            <span id="dash-month-label">April 2026</span>
             <button onclick="changeMonth(1)">›</button>
           </div>
           <button class="btn btn-ghost btn-sm" onclick="switchView('entries')" style="color:var(--teal)">View all →</button>
@@ -508,7 +508,7 @@
       <div class="vh-actions">
         <div class="month-picker">
           <button onclick="changeMonth(-1)">‹</button>
-          <span id="entries-month-label">June 2026</span>
+          <span id="entries-month-label">April 2026</span>
           <button onclick="changeMonth(1)">›</button>
         </div>
         <select class="select-ctrl" style="width:200px" onchange="filterEntriesByClient(this.value)" id="entries-client-filter">
@@ -551,7 +551,7 @@
         </div>
         <div class="month-picker">
           <button onclick="changeMonth(-1)">‹</button>
-          <span id="hst-month-label">June 2026</span>
+          <span id="hst-month-label">April 2026</span>
           <button onclick="changeMonth(1)">›</button>
         </div>
       </div>
@@ -911,7 +911,7 @@ async function fetchLiveForAccount(accountNo, period) {
     // Fetch clients, approvals, and audit in parallel
     const [clientsData, approvals, auditRows] = await Promise.all([
       apiFetch('/api/live/clients'),
-      apiFetch('/api/live/approvals?limit=100' + acctParam),
+      apiFetch('/api/live/approvals?limit=1000' + acctParam),
       apiFetch('/api/live/audit?limit=8'),
     ]);
 
@@ -978,6 +978,18 @@ async function fetchLiveForAccount(accountNo, period) {
       });
       renderEntriesTable();
       renderDashEntries();
+      // Auto-set the period picker to the most recent period found in BQ (unfiltered load only)
+      if (!accountNo && approvals.length > 0) {
+        const recent = approvals.map(a => a.period).filter(Boolean).sort().reverse()[0];
+        if (recent && recent !== currentPeriod) {
+          currentPeriod = recent;
+          const parts = recent.split('-').map(Number);
+          currentMonth = { y: parts[0], m: parts[1] - 1 };
+          ['dash-month-label','entries-month-label','hst-month-label'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.textContent = fmtMonth();
+          });
+        }
+      }
     }
 
     // Update activity — only real audit events
@@ -998,14 +1010,9 @@ async function fetchLiveForAccount(accountNo, period) {
       renderActivity();
     }
 
-    // KPI summary for the period (nice-to-have)
+    // KPI summary for the period — badge is authoritative from approvals.length above
     if (period) {
-      apiFetch('/api/live/summary?period=' + period + clientParam).then(s => {
-        if (s && s.pending_approvals != null) {
-          document.getElementById('kpi-pending').textContent = s.pending_approvals;
-          document.getElementById('sb-pending-badge').textContent = s.pending_approvals;
-        }
-      }).catch(() => {});
+      apiFetch('/api/live/summary?period=' + period + clientParam).catch(() => {});
     }
 
     // Watcher + Sage history: show "run to populate" placeholders (no mock data in live mode)
@@ -1116,8 +1123,8 @@ const SAGE_HISTORY = [
 
 // ════════════════════════════════════════ STATE
 let currentClient   = CLIENTS[0];
-let currentMonth    = { y: 2026, m: 5 };
-let currentPeriod   = '2026-06';
+let currentMonth    = { y: 2026, m: 3 };   // April 2026 — most recent BQ data period
+let currentPeriod   = '2026-04';
 let selectedIds     = new Set();
 let dashSelIds      = new Set();
 let currentEntryId  = null;
@@ -1209,7 +1216,16 @@ function setClient(c) {
   }
 }
 
-function filterEntriesByClient(_val) { renderEntriesTable(); }
+function filterEntriesByClient(val) {
+  if (!getToken()) { renderEntriesTable(); return; }
+  if (!val || val === 'all') {
+    fetchLiveForAccount(null, currentPeriod);
+  } else {
+    const c = CLIENTS.find(c => String(c.id) === String(val));
+    if (c) fetchLiveForAccount(c.client_id, currentPeriod);
+    else renderEntriesTable();
+  }
+}
 function updateWatcherClient() {}
 function searchClients(_q) {}
 
@@ -1861,6 +1877,10 @@ function showToast(msg, type) {
 buildClientDropdown();
 renderHSTChart();
 updateModeBanner();
+// Sync month labels to currentPeriod state
+['dash-month-label','entries-month-label','hst-month-label'].forEach(id => {
+  const el = document.getElementById(id); if (el) el.textContent = fmtMonth();
+});
 if (!getToken()) {
   // Demo mode: render all views from mock constants only — no BQ calls
   renderActivity();
