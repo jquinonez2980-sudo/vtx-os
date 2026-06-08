@@ -293,6 +293,42 @@
   <!-- ── DASHBOARD ── -->
   <div class="view active" id="view-dashboard">
 
+    <!-- Agent Status Strip — shows live state of all AI agents -->
+    <div class="agent-strip" id="agent-strip">
+      <div class="agent-card">
+        <div class="ac-dot idle" id="ag-gmail-dot"></div>
+        <div class="ac-body">
+          <div class="ac-name">Gmail Watcher</div>
+          <div class="ac-status" id="ag-gmail-status">Idle</div>
+        </div>
+      </div>
+      <div class="agent-card">
+        <div class="ac-dot ready" id="ag-book-dot"></div>
+        <div class="ac-body">
+          <div class="ac-name">Bookkeeping Agent</div>
+          <div class="ac-status" id="ag-book-status">Ready</div>
+        </div>
+      </div>
+      <div class="agent-card">
+        <div class="ac-dot idle" id="ag-hst-dot"></div>
+        <div class="ac-body">
+          <div class="ac-name">HST Agent</div>
+          <div class="ac-status" id="ag-hst-status">Ready</div>
+        </div>
+      </div>
+      <div class="agent-card">
+        <div class="ac-dot idle" id="ag-post-dot"></div>
+        <div class="ac-body">
+          <div class="ac-name">Posting Agent</div>
+          <div class="ac-status" id="ag-post-status">Idle</div>
+        </div>
+      </div>
+      <div class="agent-strip-right">
+        <span class="agent-strip-ts" id="agent-strip-ts">—</span>
+        <span class="badge badge-navy" id="agent-strip-badge" style="display:none">Live</span>
+      </div>
+    </div>
+
     <!-- KPIs -->
     <div class="kpi-row">
       <div class="kpi" style="--kpi-color:#14B8A6;--kpi-soft:#E6FAF7">
@@ -413,7 +449,7 @@
       <div class="tbl-wrap">
         <table>
           <thead><tr>
-            <th>Date</th><th>Bank</th><th>File / Subject</th><th>Statements</th><th>Status</th>
+            <th>Date</th><th>Client</th><th>Bank</th><th>File / Subject</th><th>Statements</th><th>Status</th>
           </tr></thead>
           <tbody id="watcher-preview"></tbody>
         </table>
@@ -630,7 +666,7 @@
       <!-- Left: By-Client table -->
       <div class="card">
         <div class="card-head">
-          <div><div class="ch-title">By Client — <span id="hst-by-client-period">April 2026</span></div><div class="ch-sub">Estimated from bank transactions · 15% HST rate</div></div>
+          <div><div class="ch-title">By Client — <span id="hst-by-client-period">April 2026</span></div><div class="ch-sub">Estimated from bank transactions · 13% HST rate (Ontario)</div></div>
           <button class="btn btn-ghost btn-sm" onclick="fetchLiveHST(currentPeriod)">↻ Refresh</button>
         </div>
         <div class="tbl-wrap">
@@ -994,8 +1030,12 @@
         <div class="field-hint">Alternative to Gmail watcher — for emailed statement files</div>
       </div>
     </form>
-    <div class="modal-foot">
+    <div class="modal-foot" style="flex-wrap:wrap;gap:8px">
       <button class="btn btn-secondary" onclick="closeOnboarding()">Cancel</button>
+      <button class="btn btn-secondary" onclick="window.open('https://mail.google.com/mail/u/0/#settings/accounts','_blank')" style="display:flex;align-items:center;gap:6px">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:14px;height:14px"><path d="M20.283 10.356h-8.327v3.451h4.792c-.446 2.193-2.313 3.453-4.792 3.453a5.27 5.27 0 01-5.279-5.28 5.27 5.27 0 015.279-5.279c1.259 0 2.397.447 3.29 1.178l2.6-2.599c-1.584-1.381-3.615-2.233-5.89-2.233a8.908 8.908 0 00-8.934 8.934 8.908 8.908 0 008.934 8.934c4.467 0 8.529-3.249 8.529-8.934 0-.528-.081-1.097-.202-1.625z" fill="currentColor"/></svg>
+        Connect Google Account
+      </button>
       <button class="btn btn-primary" onclick="submitOnboarding(event)">Create Client + Start Onboarding →</button>
     </div>
   </div>
@@ -1058,9 +1098,29 @@ function updateModeBanner() {
 
 let liveClients = [];
 
+// ── Agent Status Strip helpers ───────────────────────────────────────────────
+const AGENT_IDS = { gmail: 'gmail', book: 'book', hst: 'hst', post: 'post' };
+
+function setAgentStatus(agent, state, label) {
+  const dot    = document.getElementById('ag-' + agent + '-dot');
+  const status = document.getElementById('ag-' + agent + '-status');
+  if (!dot || !status) return;
+  dot.className = 'ac-dot ' + state;
+  status.textContent = label || state.charAt(0).toUpperCase() + state.slice(1);
+}
+
+function updateAgentStripMeta(msg) {
+  const ts = document.getElementById('agent-strip-ts');
+  if (ts) ts.textContent = msg || new Date().toLocaleTimeString();
+  const badge = document.getElementById('agent-strip-badge');
+  if (badge) { badge.style.display = ''; badge.textContent = 'Live'; }
+}
+
 // ── Live data fetch: all data from BQ, no mock constants used ──────────────
 async function fetchLiveForAccount(accountNo, period) {
   if (!getToken()) return;
+
+  setAgentStatus('book', 'running', 'Fetching…');
 
   const acctParam   = accountNo ? '&account_no=' + encodeURIComponent(accountNo) : '';
   const clientParam = accountNo ? '&client='     + encodeURIComponent(accountNo) : '';
@@ -1194,8 +1254,11 @@ async function fetchLiveForAccount(accountNo, period) {
       applyUserIdentity(savedName || serverName, u.email);
     }).catch(() => { if (savedName) applyUserIdentity(savedName, null); });
 
+    setAgentStatus('book', 'done', 'Synced');
+    updateAgentStripMeta('Updated ' + new Date().toLocaleTimeString());
+
     // Watcher + Sage history: show "run to populate" placeholders (no mock data in live mode)
-    const emptyWatcherPreview = '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
+    const emptyWatcherPreview = '<tr><td colspan="6" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
     const emptyWatcherFull    = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
     const el1 = document.getElementById('watcher-preview');
     const el2 = document.getElementById('watcher-full-table');
@@ -1205,6 +1268,7 @@ async function fetchLiveForAccount(accountNo, period) {
     if (sageHist) sageHist.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No post history — use local _post_je.py to post to Sage 50</td></tr>';
 
   } catch (err) {
+    setAgentStatus('book', 'error', 'Error');
     const msg = String(err.message || err);
     if (msg.includes('401') || msg.includes('403')) {
       showToast('Access denied — check your access key', 'warning');
@@ -1223,7 +1287,7 @@ function saveToken() {
   updateModeBanner();
   if (val) {
     showToast('Key saved — loading live data…', 'success');
-    fetchLiveForAccount(currentClient?.client_id, currentPeriod);
+    fetchLiveForAccount(currentClient?.client_id, null);
     loadUnposted();
   } else {
     showToast('Key cleared · demo mode active', 'info');
@@ -1281,7 +1345,7 @@ const ACTIVITY = [
   { type:'approve', icon:'✓', color:'var(--green-bg)', iconColor:'var(--green)',   text:'8 entries approved',                  meta:'Summit Stone Group · 4m ago' },
   { type:'watcher', icon:'📧', color:'var(--blue-bg)',  iconColor:'var(--blue)',    text:'Gmail Watcher detected 3 statements', meta:'TD Bank · Maple Ridge · 12m ago' },
   { type:'post',    icon:'→',  color:'#EEF2F6',         iconColor:'var(--navy)',    text:'31 entries posted to Sage 50',        meta:'All clients · 2h ago' },
-  { type:'hst',     icon:'$',  color:'var(--amber-bg)', iconColor:'var(--amber)',   text:'HST filing reminder — 14 days',       meta:'Horizon HVAC Ltd. · 3h ago' },
+  { type:'hst',     icon:'$',  color:'var(--gold-soft)', iconColor:'var(--gold)',    text:'HST filing reminder — 14 days',       meta:'Horizon HVAC Ltd. · 3h ago' },
   { type:'client',  icon:'+',  color:'var(--teal-soft)',iconColor:'#0C7A6E',        text:'New client onboarded',                meta:'GlassHouse Architecture · 1d ago' },
   { type:'approve', icon:'✓', color:'var(--green-bg)', iconColor:'var(--green)',   text:'12 entries approved',                 meta:'Parkview Legal LLP · 1d ago' },
   { type:'watcher', icon:'📧', color:'var(--blue-bg)',  iconColor:'var(--blue)',    text:'RBC statement processed (8 pages)',   meta:'Maple Ridge Interiors · 1d ago' },
@@ -1415,8 +1479,35 @@ function filterEntriesByClient(val) {
     else renderEntriesTable();
   }
 }
-function updateWatcherClient() {}
-function searchClients(_q) {}
+function updateWatcherClient() {
+  const sel = document.getElementById('watcher-client-select');
+  const val = sel?.value;
+  if (!val || val === 'all') return;
+  const saved = JSON.parse(localStorage.getItem('acumen_chips_' + val) || '[]');
+  document.querySelectorAll('.bank-chip').forEach(chip => {
+    const bank = chip.dataset.bank;
+    if (saved.length === 0 || saved.includes(bank)) chip.classList.add('selected');
+    else chip.classList.remove('selected');
+  });
+}
+
+function saveChipSelection() {
+  const sel = document.getElementById('watcher-client-select');
+  const val = sel?.value;
+  if (!val || val === 'all') return;
+  const selected = [...document.querySelectorAll('.bank-chip.selected')].map(c => c.dataset.bank);
+  localStorage.setItem('acumen_chips_' + val, JSON.stringify(selected));
+}
+
+function searchClients(q) {
+  const list = document.getElementById('clients-list');
+  if (!list) return;
+  const term = (q || '').toLowerCase().trim();
+  list.querySelectorAll('.client-row').forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = (!term || text.includes(term)) ? '' : 'none';
+  });
+}
 
 // ════════════════════════════════════════ ACTIVITY FEED
 function renderActivity() {
@@ -1471,7 +1562,7 @@ function changeMonth(dir) {
 
 // ════════════════════════════════════════ ENTRIES TABLE
 function conf(pct) {
-  const color = pct>=95 ? 'var(--teal)' : pct>=80 ? 'var(--amber)' : 'var(--red)';
+  const color = pct>=95 ? 'var(--teal)' : pct>=80 ? 'var(--gold)' : 'var(--red)';
   return '<div style="display:flex;align-items:center;gap:7px"><div class="conf-bar"><div class="fill" style="width:' + pct + '%;background:' + color + '"></div></div><span class="conf-pct">' + pct + '%</span></div>';
 }
 
@@ -1801,7 +1892,7 @@ async function restoreClient(accountNo) {
 }
 
 // ════════════════════════════════════════ WATCHER
-function toggleBank(el) { el.classList.toggle('selected'); }
+function toggleBank(el) { el.classList.toggle('selected'); saveChipSelection(); }
 
 const LOG_MESSAGES = [
   'Authenticating with Google OAuth…','✓ Authentication successful',
@@ -1831,6 +1922,7 @@ async function runWatcher() {
   btn.dataset.running = true;
   btn.textContent = '⏳ Running…';
   btn.disabled = true;
+  setAgentStatus('gmail', 'running', 'Scanning…');
   const logWrap = document.getElementById('watcher-log-wrap');
   const log     = document.getElementById('watcher-log');
   const badge   = document.getElementById('watcher-progress-badge');
@@ -1858,13 +1950,15 @@ async function runWatcher() {
     if (result.ok) {
       btn.textContent = '✓ Complete';
       btn.style.background = 'var(--green)';
+      setAgentStatus('gmail', 'done', 'Done');
       document.getElementById('watcher-run-status').textContent = 'Completed · ' + (result.lines||[]).length + ' log lines';
       badge.innerHTML = '<span class="badge badge-green badge-dot">Done</span>';
       showToast('Gmail Watcher completed — check the log for new entries', 'success');
       setTimeout(() => { fetchLiveForAccount(null, currentPeriod); loadUnposted(); }, 1000);
     } else {
       btn.textContent = '⚠ Check Log';
-      btn.style.background = 'var(--amber)';
+      btn.style.background = 'var(--gold)';
+      setAgentStatus('gmail', 'error', 'Warnings');
       document.getElementById('watcher-run-status').textContent = 'Finished with warnings';
       badge.innerHTML = '<span class="badge badge-gold badge-dot">Check log</span>';
       showToast('Watcher finished — check the log for details', 'warning');
@@ -1873,6 +1967,7 @@ async function runWatcher() {
     appendLogLine(log, 'ERROR: ' + err.message, 'warn');
     btn.textContent = '⚠ Failed';
     btn.style.background = 'var(--red)';
+    setAgentStatus('gmail', 'error', 'Failed');
     showToast('Watcher request failed: ' + err.message, 'warning');
   }
   setTimeout(() => {
@@ -2019,8 +2114,9 @@ function renderHSTByClient() {
       '<tr><td><div style="font-weight:500">' + escHtml(a.name) + '</div></td>' +
       '<td style="font-weight:600">$' + a.collected.toLocaleString('en',{minimumFractionDigits:2}) + '</td>' +
       '<td style="font-weight:600;color:var(--red)">$' + a.owing.toLocaleString('en',{minimumFractionDigits:2}) + '</td>' +
-      '<td><span class="badge badge-gold badge-dot">Due ' + (period || fmtMonth()) + '</span></td></tr>'
-    ).join('') || '<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No HST data for this period</td></tr>';
+      '<td><span class="badge badge-gold badge-dot">Due ' + (period || fmtMonth()) + '</span></td>' +
+      '<td><span class="badge badge-blue badge-dot">Live</span></td></tr>'
+    ).join('') || '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No HST data for this period</td></tr>';
     return;
   }
   // Demo mode: use mock client data
@@ -2093,7 +2189,7 @@ function renderClientsList() {
     '<div class="client-row">' +
     '<div><div class="cr-name">' + escHtml(c.name) + '</div><div class="cr-sub">' + escHtml(c.acct || c.account_masked || '') + ' · ' + escHtml(c.bank || '') + '</div></div>' +
     '<div style="color:var(--t2);font-size:12px">' + escHtml(c.industry || '—') + '</div>' +
-    '<div style="font-weight:600;color:' + (c.unrec>20?'var(--amber)':'var(--t1)') + '">' + (c.unrec||'—') + '</div>' +
+    '<div style="font-weight:600;color:' + (c.unrec>20?'var(--gold)':'var(--t1)') + '">' + (c.unrec||'—') + '</div>' +
     '<div style="font-weight:600;color:' + (c.hst>5000?'var(--red)':'var(--t1)') + '">' + (c.hst?'$'+c.hst.toLocaleString():'—') + '</div>' +
     '<div style="font-size:12px;color:var(--t2)">' + escHtml(c.recon || '—') + '</div>' +
     '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
@@ -2125,6 +2221,7 @@ async function triggerHSTAgent() {
   const statusBadge = document.getElementById('hst-agent-status');
   if (btn) { btn.disabled = true; }
   if (statusBadge) statusBadge.innerHTML = '<span class="badge badge-gold badge-dot">Running…</span>';
+  setAgentStatus('hst', 'running', 'Preparing…');
   if (log) { log.style.display = 'block'; log.innerHTML = ''; appendLogLine(log, '[HST Agent] Starting preparation for ' + currentPeriod + '…', 'info'); }
   if (!getToken()) {
     await new Promise(r => setTimeout(r, 800));
@@ -2147,6 +2244,7 @@ async function triggerHSTAgent() {
       });
     }
     if (statusBadge) statusBadge.innerHTML = result.ok ? '<span class="badge badge-green badge-dot">Done</span>' : '<span class="badge badge-gold badge-dot">Check log</span>';
+    setAgentStatus('hst', result.ok ? 'done' : 'error', result.ok ? 'Done' : 'Check log');
     if (result.ok || result.lines) {
       showToast('HST agent completed — refreshing data', 'success');
       setTimeout(() => fetchLiveHST(currentPeriod), 1000);
@@ -2154,6 +2252,7 @@ async function triggerHSTAgent() {
   } catch (err) {
     if (log) appendLogLine(log, 'ERROR: ' + err.message, 'warn');
     if (statusBadge) statusBadge.innerHTML = '<span class="badge badge-red badge-dot">Error</span>';
+    setAgentStatus('hst', 'error', 'Error');
     showToast('HST agent error: ' + err.message, 'warning');
   }
   if (btn) btn.disabled = false;
@@ -2311,7 +2410,7 @@ async function submitOnboarding(e) {
       if (result.ok) {
         showToast('Client "' + companyName + '" added to registry (ID: ' + clientId + ')', 'success');
         setTimeout(() => showToast('Run Gmail Watcher to activate statement detection', 'info'), 1400);
-        fetchLiveForAccount(null, currentPeriod);
+        fetchLiveForAccount(null, null);
       } else if (result.manual) {
         showToast('Registry not accessible from server — add manually to client_accounts.csv', 'warning');
         setTimeout(() => showToast('Row: ' + result.row, 'info'), 1000);
@@ -2367,8 +2466,8 @@ if (!getToken()) {
   renderClientsList();
   showSignIn();
 } else {
-  // Live mode: all data from BQ — mock constants are not rendered
-  fetchLiveForAccount(null, currentPeriod);
+  // Live mode: all data from BQ — null period triggers auto-detect of most recent period
+  fetchLiveForAccount(null, null);
   loadUnposted();
   fetchLiveHST(currentPeriod);
 }

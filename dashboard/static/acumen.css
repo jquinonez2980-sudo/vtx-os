@@ -39,6 +39,10 @@
   --gold:       var(--gold-500);
   --gold-soft:  var(--gold-50);
 
+  /* ── Amber / Gold alias (used by activity feed + confidence bars) ── */
+  --amber:      var(--gold-500);
+  --amber-bg:   var(--gold-50);
+
   /* ── Status colors ── */
   --blue:       #2563EB;
   --blue-bg:    #EFF6FF;
@@ -1072,3 +1076,106 @@ tbody tr.selected td { background: var(--teal-50); }
 }
 
 /* ──────────── DROPDOWN ─── (inlined in HTML <style> but also here for completeness) */
+
+/* ─────────────────────────────────── AGENT STATUS STRIP ─── */
+.agent-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 12px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  min-height: 48px;
+}
+.agent-strip::-webkit-scrollbar { display: none; }
+
+.agent-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-right: 1px solid var(--card-border);
+  flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-standard);
+  cursor: default;
+}
+.agent-card:last-of-type { border-right: none; }
+.agent-card:hover { background: var(--page-bg); }
+
+.ac-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--t4);
+  flex-shrink: 0;
+  transition: background 300ms;
+}
+.ac-dot.idle    { background: var(--t4); }
+.ac-dot.ready   { background: var(--blue); }
+.ac-dot.running { background: var(--teal); animation: pulseDot 1.4s ease-in-out infinite; }
+.ac-dot.done    { background: var(--green); }
+.ac-dot.error   { background: var(--red); }
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1;   transform: scale(1);   }
+  50%       { opacity: 0.4; transform: scale(1.5); }
+}
+
+.ac-body { min-width: 0; }
+.ac-name {
+  font: 600 11px/1 'Montserrat', sans-serif;
+  color: var(--t2);
+  white-space: nowrap;
+}
+.ac-status {
+  font: 500 10px/1.4 'Montserrat', sans-serif;
+  color: var(--t3);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.agent-strip-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 12px;
+  flex-shrink: 0;
+}
+.agent-strip-ts {
+  font: 400 11px/1 'JetBrains Mono', monospace;
+  color: var(--t4);
+}
+
+/* ─────────────────────────────────── MODE BANNER ─── */
+#mode-banner.live  {
+  background: var(--green-bg); color: var(--green);
+  border-color: var(--green-bd); font-weight: 600;
+}
+#mode-banner.demo  {
+  background: var(--gold-soft); color: var(--gold-700);
+  border-color: var(--gold-100);
+}
+#mode-banner {
+  padding: 5px 10px; border-radius: 100px;
+  font: 600 11px/1 'Montserrat', sans-serif;
+  border: 1px solid var(--card-border);
+  cursor: pointer; white-space: nowrap;
+  transition: all var(--dur-base) var(--ease);
+}
+
+/* ─────────────────────────────────── AI CONFIDENCE BADGE ─── */
+.ai-conf {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: 600 10px/1 'JetBrains Mono', monospace;
+  padding: 2px 7px; border-radius: 100px;
+  background: var(--teal-soft); color: var(--teal-700);
+  border: 1px solid var(--teal-100);
+}
+.ai-conf.high  { background: var(--green-bg); color: var(--green); border-color: var(--green-bd); }
+.ai-conf.med   { background: var(--gold-soft); color: var(--gold-700); border-color: var(--gold-100); }
+.ai-conf.low   { background: var(--red-bg); color: var(--red); border-color: #FECACA; }
