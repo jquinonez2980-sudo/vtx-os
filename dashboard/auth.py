@@ -73,31 +73,36 @@ def require_user(request: Request) -> dict[str, Any]:
         )
     token = header[len("Bearer "):].strip()
 
-    # ── API-key mode (no JWKS configured) ────────────────────────────────────
-    if not AUTH_JWKS_URL:
-        if not DASHBOARD_API_KEY:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Server not configured: set DASHBOARD_API_KEY or AUTH_JWKS_URL",
-            )
-        if not secrets.compare_digest(token, DASHBOARD_API_KEY):
+    # ── API key check — always runs first regardless of JWKS config ──────────
+    # This allows the standalone SPA (which sends the raw API key) to work
+    # alongside Clerk JWT auth from the orchelix.com Next.js app.
+    if DASHBOARD_API_KEY and secrets.compare_digest(token, DASHBOARD_API_KEY):
+        return {"sub": "admin", "email": "jquinonez2980@gmail.com"}
+
+    # ── JWKS / JWT validation (Clerk or other provider) ───────────────────────
+    if AUTH_JWKS_URL:
+        try:
+            return _decode(token)
+        except HTTPException:
+            raise
+        except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid access key",
+                detail="Invalid or expired token",
                 headers={"WWW-Authenticate": "Bearer"},
-            )
-        return {"sub": "admin", "email": "jquinonez2980@gmail.com"}
-    # ── Production JWKS validation ────────────────────────────────────────────
-    try:
-        return _decode(token)
-    except HTTPException:
-        raise
-    except Exception as exc:  # invalid signature / expired / wrong aud-iss / JWKS error
+            ) from exc
+
+    # ── Neither matched ────────────────────────────────────────────────────────
+    if not DASHBOARD_API_KEY and not AUTH_JWKS_URL:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server not configured: set DASHBOARD_API_KEY or AUTH_JWKS_URL",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid access key",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def reviewer_email(claims: dict[str, Any]) -> str:
