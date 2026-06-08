@@ -1020,7 +1020,8 @@ async function fetchLiveForAccount(accountNo, period) {
     apiFetch('/api/live/user').then(u => {
       if (!u || !u.email) return;
       const name = u.name || (u.email ? u.email.split('@')[0] : 'Admin');
-      const initials = name.trim().split(/\s+/).map(p => p[0]).join('').toUpperCase().slice(0, 2) || u.email.slice(0, 2).toUpperCase();
+      const parts = name.trim().split(/\s+/);
+      const initials = (parts.length > 1 ? parts.map(p => p[0]).join('') : name).toUpperCase().slice(0, 2) || 'AD';
       const sbAv = document.getElementById('sb-user-avatar'); if (sbAv) sbAv.textContent = initials;
       const sbNm = document.getElementById('sb-user-name');   if (sbNm) sbNm.textContent = name;
       const sbRl = document.getElementById('sb-user-role');   if (sbRl) sbRl.textContent = u.email;
