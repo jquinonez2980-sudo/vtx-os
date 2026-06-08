@@ -924,4 +924,151 @@ tbody tr.selected td { background: var(--teal-50); }
   border: 1px solid var(--green-bd);
 }
 
+/* ══════════════════════════════════════════════════ MOBILE RESPONSIVE ─── */
+
+/* Hamburger button — hidden on desktop */
+.hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: 36px; height: 36px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+.hamburger span {
+  display: block;
+  width: 16px; height: 1.5px;
+  background: var(--t2);
+  border-radius: 2px;
+  transition: all 200ms var(--ease);
+}
+
+/* Sidebar overlay (mobile) */
+.sidebar-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(10,37,64,0.45);
+  z-index: 19;
+  backdrop-filter: blur(2px);
+}
+.sidebar-overlay.visible { display: block; }
+
+@media (max-width: 767px) {
+  /* ── Hamburger visible, sidebar off-screen ── */
+  .hamburger { display: flex; }
+
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 280ms var(--ease);
+    z-index: 20;
+    width: 260px;
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  /* ── Header spans full width ── */
+  .header {
+    left: 0;
+    padding: 0 14px;
+    gap: 10px;
+  }
+
+  /* ── Hide less-important header items on small screens ── */
+  .client-selector { display: none; }
+  .icon-btn:not(:first-of-type) { display: none; }
+  .h-avatar { display: none; }
+
+  /* ── Content fills screen ── */
+  .content-wrap {
+    margin-left: 0;
+    padding: 70px 14px 28px;
+  }
+
+  /* ── KPI grid: 2 columns ── */
+  .kpi-row {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .kpi { padding: 14px 14px; }
+  .kpi-val { font-size: 22px; }
+
+  /* ── Two/three column grids: stack ── */
+  .two-col, .three-col {
+    grid-template-columns: 1fr;
+  }
+
+  /* ── View header: stack title + actions ── */
+  .view-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .vh-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .vh-title { font-size: 19px; }
+
+  /* ── Tables: horizontal scroll ── */
+  .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { min-width: 540px; }
+
+  /* ── Client rows: simpler two-column layout ── */
+  .client-row {
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+  .client-row > div:nth-child(2),
+  .client-row > div:nth-child(3),
+  .client-row > div:nth-child(4),
+  .client-row > div:nth-child(5) { display: none; }
+
+  /* ── Sage status card: stack vertically ── */
+  .sage-status-card { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .sage-status-card > div:last-child { align-items: flex-start; }
+  .sage-status-card input { width: 100% !important; }
+
+  /* ── Form rows: always stack ── */
+  .form-row { grid-template-columns: 1fr !important; }
+  .form-row.cols-3 { grid-template-columns: 1fr !important; }
+
+  /* ── Modal: full-screen feel ── */
+  .modal {
+    max-width: 100% !important;
+    margin: 0 12px;
+    max-height: 88vh;
+    overflow-y: auto;
+  }
+
+  /* ── Sign-in card: full width ── */
+  .signin-card { margin: 0 16px; padding: 32px 24px; }
+
+  /* ── Stat grid: 2 cols ── */
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+
+  /* ── Bank chips: wrap ── */
+  .bank-chips { flex-wrap: wrap; }
+
+  /* ── Progress log: smaller ── */
+  .progress-log { font-size: 11px; }
+
+  /* ── HST chart: full width ── */
+  #hst-chart { width: 100%; }
+
+  /* ── Page title shorter on mobile ── */
+  .page-title { font-size: 13px; }
+}
+
+@media (max-width: 480px) {
+  .kpi-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kpi-val { font-size: 20px; }
+  .content-wrap { padding: 66px 10px 24px; }
+  #mode-banner { font-size: 10px; padding: 4px 8px; }
+}
+
 /* ──────────── DROPDOWN ─── (inlined in HTML <style> but also here for completeness) */
