@@ -71,16 +71,22 @@ def submit(
 # Read
 # ---------------------------------------------------------------------------
 
-def get_pending(limit: int = 100) -> list[ApprovalItem]:
+def get_pending(limit: int = 100, account_no: str | None = None) -> list[ApprovalItem]:
     """Return PENDING items ordered by date ascending (oldest first)."""
+    where = "status = 'PENDING'"
+    params: list[bigquery.ScalarQueryParameter] = []
+    if account_no:
+        where += " AND account_no = @account_no"
+        params.append(bigquery.ScalarQueryParameter("account_no", "STRING", account_no))
     query = f"""
         SELECT * EXCEPT (_loaded_at, _session_id)
         FROM `{TABLE_ID}`
-        WHERE status = 'PENDING'
+        WHERE {where}
         ORDER BY txn_date ASC, created_at ASC
         LIMIT {limit}
     """
-    rows = list(_bq().query(query).result())
+    job_cfg = bigquery.QueryJobConfig(query_parameters=params) if params else None
+    rows = list(_bq().query(query, job_config=job_cfg).result())
     return [ApprovalItem.model_validate(dict(row.items())) for row in rows]
 
 

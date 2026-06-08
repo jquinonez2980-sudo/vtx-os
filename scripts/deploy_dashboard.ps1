@@ -17,7 +17,8 @@
 # characters (em-dash, smart quotes) in files saved without a BOM.
 
 param(
-    [string]$JwksUrl    = "",
+    [string]$ApiKey     = "",     # DASHBOARD_API_KEY: required for /api/live/* access
+    [string]$JwksUrl    = "",     # AUTH_JWKS_URL:     Clerk/Auth0 JWKS (overrides ApiKey)
     [string]$Issuer     = "",
     [string]$Audience   = "",
     [string]$CorsOrigin = "https://orchelix.com,https://www.orchelix.com"
@@ -70,13 +71,15 @@ Write-Host "4/4  Deploying Cloud Run service $SERVICE ..." -ForegroundColor Yell
 # Use gcloud's alternate-delimiter syntax (^@^) because CORS_ORIGIN may itself
 # contain commas (multiple origins) and gcloud splits env-var pairs on commas.
 $envVars = "^@^GOOGLE_CLOUD_PROJECT=$PROJECT@BQ_LOCATION=$REGION@CORS_ORIGIN=$CorsOrigin"
+if ($ApiKey)   { $envVars = "$envVars@DASHBOARD_API_KEY=$ApiKey" }
 if ($JwksUrl)  { $envVars = "$envVars@AUTH_JWKS_URL=$JwksUrl" }
 if ($Issuer)   { $envVars = "$envVars@AUTH_ISSUER=$Issuer" }
 if ($Audience) { $envVars = "$envVars@AUTH_AUDIENCE=$Audience" }
 
-if (-not $JwksUrl) {
-    Write-Host "     NOTE: AUTH_JWKS_URL not set - /api/live/* will reject all tokens (401)." -ForegroundColor DarkYellow
-    Write-Host "           Re-run with -JwksUrl and -Issuer once Clerk is wired." -ForegroundColor DarkYellow
+if (-not $ApiKey -and -not $JwksUrl) {
+    Write-Host "     NOTE: Neither -ApiKey nor -JwksUrl set." -ForegroundColor DarkYellow
+    Write-Host "           /api/live/* will return 503 until DASHBOARD_API_KEY is configured." -ForegroundColor DarkYellow
+    Write-Host "           Re-run: .\scripts\deploy_dashboard.ps1 -ApiKey 'your-strong-secret'" -ForegroundColor DarkYellow
 }
 
 gcloud run deploy $SERVICE `

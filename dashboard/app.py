@@ -192,9 +192,13 @@ def live_audit(limit: int = 50, _user: dict = Depends(require_user)) -> list[dic
 
 
 @app.get("/api/live/approvals")
-def live_approvals(limit: int = 100, _user: dict = Depends(require_user)) -> list[dict[str, Any]]:
+def live_approvals(
+    limit: int = 100,
+    account_no: str | None = None,
+    _user: dict = Depends(require_user),
+) -> list[dict[str, Any]]:
     from core.approval_queue import get_pending
-    items = get_pending(limit=limit)
+    items = get_pending(limit=limit, account_no=account_no)
     return [it.model_dump(mode="json") for it in items]
 
 

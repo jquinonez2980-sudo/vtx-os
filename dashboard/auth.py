@@ -18,6 +18,7 @@ raises 401. Tests monkeypatch `_decode` (or `_jwks_client`) to stay offline.
 from __future__ import annotations
 
 import os
+import secrets
 from functools import lru_cache
 from typing import Any
 
@@ -25,9 +26,10 @@ import jwt
 from fastapi import HTTPException, Request, status
 from jwt import PyJWKClient
 
-AUTH_JWKS_URL = os.environ.get("AUTH_JWKS_URL", "")
-AUTH_ISSUER = os.environ.get("AUTH_ISSUER", "")
-AUTH_AUDIENCE = os.environ.get("AUTH_AUDIENCE", "")
+AUTH_JWKS_URL    = os.environ.get("AUTH_JWKS_URL", "")
+AUTH_ISSUER      = os.environ.get("AUTH_ISSUER", "")
+AUTH_AUDIENCE    = os.environ.get("AUTH_AUDIENCE", "")
+DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "")
 
 
 @lru_cache(maxsize=1)
@@ -71,19 +73,20 @@ def require_user(request: Request) -> dict[str, Any]:
         )
     token = header[len("Bearer "):].strip()
 
-    # ── Dev bypass (no JWKS configured) ──────────────────────────────────────
+    # ── API-key mode (no JWKS configured) ────────────────────────────────────
     if not AUTH_JWKS_URL:
-        # Accept any non-empty token; try to peek at the payload for a nice email.
-        import base64, json as _json
-        claims: dict[str, Any] = {"sub": "dev", "email": "dev@local"}
-        try:
-            parts = token.split(".")
-            if len(parts) >= 2:
-                padded = parts[1] + "=" * (-len(parts[1]) % 4)
-                claims = _json.loads(base64.urlsafe_b64decode(padded))
-        except Exception:
-            pass
-        return claims
+        if not DASHBOARD_API_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server not configured: set DASHBOARD_API_KEY or AUTH_JWKS_URL",
+            )
+        if not secrets.compare_digest(token, DASHBOARD_API_KEY):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid access key",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return {"sub": "admin", "email": "jquinonez2980@gmail.com"}
     # ── Production JWKS validation ────────────────────────────────────────────
     try:
         return _decode(token)

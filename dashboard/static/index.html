@@ -130,12 +130,12 @@
     <div class="signin-title">AcumenAI</div>
     <div class="signin-sub">by Orchelix · Accounting OS</div>
     <div style="margin-top:28px">
-      <label class="field-label">Bearer Token</label>
+      <label class="field-label">Access Key</label>
       <input class="input" type="password" id="signin-token-input"
-             placeholder="eyJhbGciOi…"
-             style="font-family:'JetBrains Mono',monospace;font-size:12px;margin-top:6px"
+             placeholder="Enter your dashboard access key"
+             style="margin-top:6px"
              onkeydown="if(event.key==='Enter')signIn()">
-      <div class="field-hint">Paste your API token to connect live BigQuery data</div>
+      <div class="field-hint">Enter the access key configured for this dashboard</div>
     </div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:16px" onclick="signIn()">
       Connect Live Data →
@@ -722,21 +722,21 @@
       <div class="card-head">
         <div>
           <div class="ch-title">Live Data Connection</div>
-          <div class="ch-sub">Paste a bearer token to switch from demo to live BigQuery data</div>
+          <div class="ch-sub">Enter your access key to connect live BigQuery data</div>
         </div>
         <div id="mode-badge-settings"></div>
       </div>
       <div class="card-body">
         <div style="margin-bottom:14px">
-          <label class="field-label">API Bearer Token</label>
+          <label class="field-label">Access Key</label>
           <div style="display:flex;gap:8px;margin-top:4px">
-            <input class="input" type="password" id="settings-token-input" placeholder="eyJhbGciOiJSUzI1NiIs…" style="font-family:'JetBrains Mono',monospace;font-size:12px">
+            <input class="input" type="password" id="settings-token-input" placeholder="Enter your dashboard access key">
             <button class="btn btn-teal" onclick="saveToken()" style="flex-shrink:0">Save</button>
           </div>
-          <div class="field-hint">Token is stored in browser localStorage only — never sent to any third party. Validated against the same JWKS endpoint as the Cloud Run API.</div>
+          <div class="field-hint">Key is stored in browser localStorage only — never sent to any third party. Validated server-side on every live data request.</div>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-secondary btn-sm" onclick="clearToken()">Clear Token</button>
+          <button class="btn btn-secondary btn-sm" onclick="signOut()">Sign Out</button>
           <button class="btn btn-ghost btn-sm" onclick="testConnection()">Test Connection</button>
         </div>
       </div>
@@ -900,89 +900,92 @@ function updateModeBanner() {
 
 let liveClients = [];
 
-async function fetchLiveData() {
+// ── Live data fetch: all data from BQ, no mock constants used ──────────────
+async function fetchLiveForAccount(accountNo, period) {
   if (!getToken()) return;
 
-  // Load live clients (enrich CLIENTS array with client_id for archive/posting)
+  const acctParam   = accountNo ? '&account_no=' + encodeURIComponent(accountNo) : '';
+  const clientParam = accountNo ? '&client='     + encodeURIComponent(accountNo) : '';
+
   try {
-    const clientsData = await apiFetch('/api/live/clients');
+    // Fetch clients, approvals, and audit in parallel
+    const [clientsData, approvals, auditRows] = await Promise.all([
+      apiFetch('/api/live/clients'),
+      apiFetch('/api/live/approvals?limit=100' + acctParam),
+      apiFetch('/api/live/audit?limit=8'),
+    ]);
+
+    // Replace CLIENTS with live data — no mock mixing
     if (Array.isArray(clientsData) && clientsData.length > 0) {
       liveClients = clientsData;
-      // Try to match live clients into the CLIENTS mock array by client_id substring
-      clientsData.forEach(lc => {
-        const match = CLIENTS.find(c =>
-          c.name.toLowerCase().replace(/\s+/g,'').includes(lc.client_id.replace(/-/g,'').toLowerCase()) ||
-          lc.client_id.replace(/-/g,'').toLowerCase().includes(c.name.toLowerCase().split(' ')[0])
-        );
-        if (match) {
-          match.client_id      = lc.client_id;
-          match.account_masked = lc.account_masked;
-          match.gl_bank_account = lc.gl_bank_account;
-        } else {
-          // Add as a new entry if not already in CLIENTS
-          const exists = CLIENTS.find(c => c.client_id === lc.client_id);
-          if (!exists) {
-            CLIENTS.push({
-              id: CLIENTS.length + 100, abbr: lc.client_id.slice(0,2).toUpperCase(),
-              name: lc.client_id, industry: 'Live', bank: lc.bank || '—',
-              acct: lc.account_masked || '—', unrec: 0, hst: 0,
-              recon: '—', stage: 'review', since: '—', color: '#0C7A6E',
-              hstData: [0,0,0,0,0,0],
-              client_id: lc.client_id, account_masked: lc.account_masked,
-              gl_bank_account: lc.gl_bank_account,
-            });
-          }
-        }
+      const COLORS = ['#0A2540','#0C7A6E','#2563EB','#7C3AED','#B45309'];
+      CLIENTS.length = 0;
+      clientsData.forEach((lc, i) => {
+        const acct = lc.account_masked || lc.client_id || '—';
+        CLIENTS.push({
+          id: 100 + i,
+          abbr: acct.slice(-4).toUpperCase(),
+          name: lc.client_id || acct,
+          industry: (lc.bank || '—') + ' Account',
+          bank: lc.bank || '—',
+          acct: acct,
+          unrec: 0, hst: 0, recon: '—', stage: 'review', since: '—',
+          color: COLORS[i % COLORS.length],
+          hstData: [0,0,0,0,0,0],
+          client_id:       lc.client_id,
+          account_masked:  lc.account_masked,
+          gl_bank_account: lc.gl_bank_account,
+        });
       });
+      // Set currentClient to the selected account, or first available
+      const target = accountNo
+        ? CLIENTS.find(c => c.client_id === accountNo || c.account_masked === accountNo)
+        : null;
+      currentClient = target || CLIENTS[0] || currentClient;
       buildClientDropdown();
       renderClientsList();
+      // Update header + client card
+      const c = currentClient;
+      document.getElementById('cs-name').textContent = c.name;
+      document.getElementById('cq-logo').textContent = c.abbr;
+      document.getElementById('cq-logo').style.background = 'linear-gradient(135deg,' + c.color + ' 0%,#1B355A 100%)';
+      document.getElementById('cq-name').textContent = c.name;
+      document.getElementById('cq-meta').textContent = c.industry + ' · ' + c.acct;
+      document.getElementById('kpi-clients').textContent = CLIENTS.length;
     }
-  } catch (_) {}
 
-  // Load pending approvals
-  try {
-    const approvals = await apiFetch('/api/live/approvals?limit=50');
-    if (Array.isArray(approvals) && approvals.length >= 0) {
+    // Update entries — only real BQ approval data
+    if (Array.isArray(approvals)) {
       const pending = approvals.length;
       document.getElementById('kpi-pending').textContent = pending;
       document.getElementById('sb-pending-badge').textContent = pending;
       ENTRIES.length = 0;
-      approvals.slice(0, 30).forEach((a, i) => {
+      approvals.forEach((a, i) => {
         const amt = parseFloat(a.amount || 0);
         ENTRIES.push({
-          id: a.queue_id || (i + 1),
-          date: a.txn_date ? String(a.txn_date).slice(5, 10) : '—',
-          desc: a.description || 'Transaction',
-          client: a.client_id || 'Unknown',
-          debit:  amt > 0 ? amt : 0,
-          credit: amt < 0 ? Math.abs(amt) : 0,
-          cat:    a.gl_account_no || '9999',
-          conf:   Math.round((parseFloat(a.confidence || 0)) * 100),
-          status: 'pending',
-          queue_id: a.queue_id,
+          id:        a.queue_id || ('live-' + i),
+          date:      a.txn_date ? String(a.txn_date).slice(0, 10) : '—',
+          desc:      a.description || 'Transaction',
+          client:    a.account_no || 'Unknown',
+          debit:     amt > 0 ? amt : 0,
+          credit:    amt < 0 ? Math.abs(amt) : 0,
+          cat:       a.suggested_gl_no || '9999',
+          conf:      Math.round((parseFloat(a.confidence || 0)) * 100),
+          status:    'pending',
+          queue_id:  a.queue_id,
+          account_no: a.account_no,
         });
       });
       renderEntriesTable();
       renderDashEntries();
     }
-  } catch (err) {
-    const msg = String(err.message || err);
-    if (msg.includes('401') || msg.includes('403')) {
-      showToast('Auth failed — token rejected by server (401)', 'warning');
-      setToken(null);
-      updateModeBanner();
-    }
-    // else: network/BQ error — keep demo data silently
-  }
 
-  // Load audit feed
-  try {
-    const auditRows = await apiFetch('/api/live/audit?limit=8');
+    // Update activity — only real audit events
     if (Array.isArray(auditRows) && auditRows.length > 0) {
       ACTIVITY.length = 0;
       auditRows.forEach(ev => {
         const isErr = ev.severity === 'ERROR';
-        const isOk  = ev.event_status === 'OK' || ev.event_type === 'AGENT_COMPLETE';
+        const isOk  = ev.status === 'OK' || ev.event_type === 'AGENT_COMPLETE';
         ACTIVITY.push({
           type:      ev.event_type,
           icon:      isErr ? '⚠' : isOk ? '✓' : '·',
@@ -994,7 +997,37 @@ async function fetchLiveData() {
       });
       renderActivity();
     }
-  } catch (_) { /* keep mock */ }
+
+    // KPI summary for the period (nice-to-have)
+    if (period) {
+      apiFetch('/api/live/summary?period=' + period + clientParam).then(s => {
+        if (s && s.pending_approvals != null) {
+          document.getElementById('kpi-pending').textContent = s.pending_approvals;
+          document.getElementById('sb-pending-badge').textContent = s.pending_approvals;
+        }
+      }).catch(() => {});
+    }
+
+    // Watcher + Sage history: show "run to populate" placeholders (no mock data in live mode)
+    const emptyWatcher = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
+    const el1 = document.getElementById('watcher-preview');
+    const el2 = document.getElementById('watcher-full-table');
+    if (el1) el1.innerHTML = emptyWatcher;
+    if (el2) el2.innerHTML = emptyWatcher;
+    const sageHist = document.getElementById('sage-history');
+    if (sageHist) sageHist.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No post history — use local _post_je.py to post to Sage 50</td></tr>';
+
+  } catch (err) {
+    const msg = String(err.message || err);
+    if (msg.includes('401') || msg.includes('403')) {
+      showToast('Access denied — check your access key', 'warning');
+      setToken(null);
+      updateModeBanner();
+      showSignIn();
+    } else {
+      showToast('Failed to load live data: ' + msg.slice(0, 80), 'warning');
+    }
+  }
 }
 
 function saveToken() {
@@ -1002,10 +1035,11 @@ function saveToken() {
   setToken(val || null);
   updateModeBanner();
   if (val) {
-    showToast('Token saved — fetching live data…', 'success');
-    fetchLiveData();
+    showToast('Key saved — loading live data…', 'success');
+    fetchLiveForAccount(currentClient?.client_id, currentPeriod);
+    loadUnposted();
   } else {
-    showToast('Token cleared · demo mode active', 'info');
+    showToast('Key cleared · demo mode active', 'info');
   }
 }
 function clearToken() {
@@ -1013,7 +1047,15 @@ function clearToken() {
   const inp = document.getElementById('settings-token-input');
   if (inp) inp.value = '';
   updateModeBanner();
-  showToast('Token cleared · demo mode active', 'info');
+  showToast('Key cleared · demo mode active', 'info');
+}
+function signOut() {
+  setToken(null);
+  const inp = document.getElementById('settings-token-input');
+  if (inp) inp.value = '';
+  updateModeBanner();
+  showToast('Signed out — demo mode active', 'info');
+  showSignIn();
 }
 async function testConnection() {
   try {
@@ -1075,6 +1117,7 @@ const SAGE_HISTORY = [
 // ════════════════════════════════════════ STATE
 let currentClient   = CLIENTS[0];
 let currentMonth    = { y: 2026, m: 5 };
+let currentPeriod   = '2026-06';
 let selectedIds     = new Set();
 let dashSelIds      = new Set();
 let currentEntryId  = null;
@@ -1153,13 +1196,17 @@ function setClient(c) {
   document.getElementById('cq-logo').textContent = c.abbr;
   document.getElementById('cq-logo').style.background = 'linear-gradient(135deg, ' + c.color + ' 0%, #1B355A 100%)';
   document.getElementById('cq-name').textContent = c.name;
-  document.getElementById('cq-meta').textContent = c.industry + ' · ' + c.acct + ' · Active since ' + c.since;
+  document.getElementById('cq-meta').textContent = c.industry + ' · ' + c.acct + (c.since && c.since !== '—' ? ' · Active since ' + c.since : '');
   document.getElementById('cq-unrec').textContent = c.unrec;
   document.getElementById('cq-hst').textContent = '$' + c.hst.toLocaleString();
   document.getElementById('cq-recon').textContent = c.recon;
-  document.getElementById('cq-client-watcher').textContent = c.name + ' · ' + c.bank + ' / TD / Amex';
+  document.getElementById('cq-client-watcher').textContent = c.name + ' · ' + c.bank;
   buildClientDropdown();
   renderHSTChart();
+  if (getToken()) {
+    fetchLiveForAccount(c.client_id, currentPeriod);
+    loadUnposted(c.client_id);
+  }
 }
 
 function filterEntriesByClient(_val) { renderEntriesTable(); }
@@ -1204,10 +1251,12 @@ function changeMonth(dir) {
   currentMonth.m += dir;
   if (currentMonth.m < 0)  { currentMonth.m = 11; currentMonth.y--; }
   if (currentMonth.m > 11) { currentMonth.m = 0;  currentMonth.y++; }
+  currentPeriod = currentMonth.y + '-' + String(currentMonth.m + 1).padStart(2, '0');
   ['dash-month-label','entries-month-label','hst-month-label'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = fmtMonth();
   });
+  if (getToken()) fetchLiveForAccount(currentClient?.client_id, currentPeriod);
 }
 
 // ════════════════════════════════════════ ENTRIES TABLE
@@ -1411,12 +1460,12 @@ function hideSignIn() {
 }
 function signIn() {
   const val = (document.getElementById('signin-token-input')?.value || '').trim();
-  if (!val) { showToast('Paste your API token first', 'warning'); return; }
+  if (!val) { showToast('Enter your access key first', 'warning'); return; }
   setToken(val);
   hideSignIn();
   updateModeBanner();
-  showToast('Token saved — loading live data…', 'success');
-  fetchLiveData();
+  showToast('Connecting to live data…', 'success');
+  fetchLiveForAccount(null, currentPeriod);
   loadUnposted();
 }
 function continueDemo() {
@@ -1427,10 +1476,11 @@ function continueDemo() {
 // ════════════════════════════════════════ UNPOSTED
 let unpostedEntries = [];
 
-async function loadUnposted() {
+async function loadUnposted(accountNo) {
   if (!getToken()) return;
   try {
-    const data = await apiFetch('/api/live/unposted?limit=100');
+    const qs = 'limit=100' + (accountNo ? '&client=' + encodeURIComponent(accountNo) : '');
+    const data = await apiFetch('/api/live/unposted?' + qs);
     if (Array.isArray(data)) {
       unpostedEntries = data;
       renderUnpostedTable();
@@ -1474,7 +1524,7 @@ async function archiveClient(clientId) {
   try {
     const result = await apiFetch('/api/ops/archive-client/' + encodeURIComponent(clientId), { method: 'POST' });
     showToast('Client "' + clientId + '" archived (' + (result.rows_archived || 0) + ' records)', 'success');
-    fetchLiveData();
+    fetchLiveForAccount(null, currentPeriod);
     loadUnposted();
   } catch (err) {
     showToast('Archive failed: ' + err.message, 'warning');
@@ -1542,7 +1592,7 @@ async function runWatcher() {
       document.getElementById('watcher-run-status').textContent = 'Completed · ' + (result.lines||[]).length + ' log lines';
       badge.innerHTML = '<span class="badge badge-green badge-dot">Done</span>';
       showToast('Gmail Watcher completed — check the log for new entries', 'success');
-      setTimeout(() => { fetchLiveData(); loadUnposted(); }, 1000);
+      setTimeout(() => { fetchLiveForAccount(null, currentPeriod); loadUnposted(); }, 1000);
     } else {
       btn.textContent = '⚠ Check Log';
       btn.style.background = 'var(--amber)';
@@ -1614,7 +1664,7 @@ async function quickRunWatcher() {
     const result = await apiFetch('/api/ops/run-watcher?' + qs.toString(), { method: 'POST' });
     if (result.ok) {
       showToast('Watcher complete for ' + currentClient.name, 'success');
-      fetchLiveData(); loadUnposted();
+      fetchLiveForAccount(currentClient?.client_id, currentPeriod); loadUnposted(currentClient?.client_id);
     } else {
       showToast('Watcher finished with warnings — check Gmail Watcher view', 'warning');
     }
@@ -1778,7 +1828,7 @@ async function submitOnboarding(e) {
       if (result.ok) {
         showToast('Client "' + companyName + '" added to registry (ID: ' + clientId + ')', 'success');
         setTimeout(() => showToast('Run Gmail Watcher to activate statement detection', 'info'), 1400);
-        fetchLiveData();
+        fetchLiveForAccount(null, currentPeriod);
       } else if (result.manual) {
         showToast('Registry not accessible from server — add manually to client_accounts.csv', 'warning');
         setTimeout(() => showToast('Row: ' + result.row, 'info'), 1000);
@@ -1809,21 +1859,22 @@ function showToast(msg, type) {
 
 // ════════════════════════════════════════ INIT
 buildClientDropdown();
-renderActivity();
-renderWatcherPreview();
-renderWatcherFull();
-renderDashEntries();
-renderEntriesTable();
 renderHSTChart();
-renderHSTByClient();
-renderSageHistory();
-renderClientsList();
 updateModeBanner();
-fetchLiveData();
-// Show sign-in overlay on first load when no token present
 if (!getToken()) {
+  // Demo mode: render all views from mock constants only — no BQ calls
+  renderActivity();
+  renderWatcherPreview();
+  renderWatcherFull();
+  renderDashEntries();
+  renderEntriesTable();
+  renderHSTByClient();
+  renderSageHistory();
+  renderClientsList();
   showSignIn();
 } else {
+  // Live mode: all data from BQ — mock constants are not rendered
+  fetchLiveForAccount(null, currentPeriod);
   loadUnposted();
 }
 </script>
