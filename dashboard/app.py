@@ -98,30 +98,72 @@ def demo_run() -> dict[str, Any]:
 # Authenticated — live BigQuery
 # --------------------------------------------------------------------------- #
 
+def _load_clients_meta() -> dict:
+    """Load display metadata from clients_meta.json (account_masked → display fields)."""
+    try:
+        import json as _json
+        _meta_path = pathlib.Path(__file__).parent / "clients_meta.json"
+        if _meta_path.exists():
+            return _json.loads(_meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+@app.get("/api/live/user")
+def live_user(user: dict = Depends(require_user)) -> dict[str, Any]:
+    """Return the authenticated user's identity from token claims."""
+    import re as _re
+    email = user.get("email") or user.get("sub") or "unknown"
+    raw = user.get("name") or ""
+    if not raw or raw == email:
+        local = email.split("@")[0] if "@" in email else email
+        # jquinonez2980 → Jorge Quinonez style not possible without real name
+        # Strip digits, split on delimiters, title-case
+        clean = _re.sub(r"\d+", "", local).replace(".", " ").replace("_", " ").replace("-", " ").strip()
+        raw = clean.title() if clean else "Admin"
+    return {"email": email, "name": raw, "sub": user.get("sub")}
+
+
 @app.get("/api/live/clients")
 def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
-    # Try the local registry CSV first (works when running locally or on a machine
-    # with the R: drive mounted). Falls back to BQ discovery when it's not reachable.
+    meta = _load_clients_meta()
+
+    def _enrich(d: dict) -> dict:
+        mask = d.get("account_masked") or ""
+        m = meta.get(mask, {})
+        if not d.get("company_name"):
+            d["company_name"] = m.get("company_name") or d.get("client_id") or mask
+        if not d.get("industry"):
+            d["industry"] = m.get("industry", "")
+        return d
+
+    # Try the local registry CSV first (works with R: drive mounted locally).
     try:
         from core.client_registry import load_registry
         registry = load_registry()
         configs = registry.values() if isinstance(registry, dict) else registry
-        result = [
-            {
+        seen: dict[str, dict] = {}
+        for c in configs:
+            if not getattr(c, "client_id", None):
+                continue
+            mask = getattr(c, "account_masked", None) or ""
+            if mask in seen:
+                continue
+            seen[mask] = _enrich({
                 "client_id": getattr(c, "client_id", None),
-                "account_masked": getattr(c, "account_masked", None),
+                "company_name": getattr(c, "r_folder", None) or getattr(c, "client_id", None),
+                "account_masked": mask,
                 "bank": getattr(c, "bank", None),
-                "gl_bank_account": getattr(c, "gl_bank_account", None),
-            }
-            for c in configs
-            if getattr(c, "client_id", None)
-        ]
-        if result:
-            return result
+                "gl_bank_account": str(getattr(c, "gl_bank_account", "") or ""),
+                "industry": "",
+            })
+        if seen:
+            return list(seen.values())
     except Exception:
         pass
 
-    # Fallback: discover distinct clients from BQ approval_queue
+    # Fallback: discover distinct clients from BQ approval_queue, deduplicated.
     try:
         from core.bq_loader import PROJECT, _bq
         rows = list(
@@ -132,16 +174,22 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
                 f"ORDER BY account_no"
             ).result()
         )
-        return [
-            {
-                "client_id": r.account_no,
-                "account_masked": r.account_no,
+        seen = {}
+        for r in rows:
+            acct = r.account_no
+            if acct in seen:
+                continue
+            m = meta.get(acct, {})
+            seen[acct] = {
+                "client_id": acct,
+                "company_name": m.get("company_name", acct),
+                "account_masked": acct,
                 "bank": r.bank_code,
                 "gl_bank_account": None,
+                "industry": m.get("industry", ""),
                 "source": "bq_discovery",
             }
-            for r in rows
-        ]
+        return list(seen.values())
     except Exception:
         return []
 
@@ -330,26 +378,48 @@ def ops_post_entries(
         return {"ok": False, "dry_run": True, "lines": [f"ERROR: {exc}"], "code": -1}
 
 
-@app.post("/api/ops/archive-client/{client_id}")
+@app.post("/api/ops/archive-client/{account_no}")
 def ops_archive_client(
-    client_id: str,
+    account_no: str,
     _user: dict = Depends(require_user),
 ) -> dict[str, Any]:
-    """Mark all BQ approval_queue rows for a client as ARCHIVED (removes from active queues)."""
+    """Mark all BQ approval_queue rows for an account as ARCHIVED."""
     from google.cloud import bigquery as _bqmod
     from core.bq_loader import PROJECT, _bq
     bq = _bq()
     sql = f"""
         UPDATE `{PROJECT}.vtx_accounting.approval_queue`
         SET status = 'ARCHIVED'
-        WHERE client_id = @client_id
+        WHERE account_no = @account_no
           AND status != 'ARCHIVED'
     """
     job = bq.query(sql, job_config=_bqmod.QueryJobConfig(
-        query_parameters=[_bqmod.ScalarQueryParameter("client_id", "STRING", client_id)]
+        query_parameters=[_bqmod.ScalarQueryParameter("account_no", "STRING", account_no)]
     ))
     job.result()
-    return {"ok": True, "client_id": client_id, "rows_archived": job.num_dml_affected_rows}
+    return {"ok": True, "account_no": account_no, "rows_archived": job.num_dml_affected_rows}
+
+
+@app.post("/api/ops/restore-client/{account_no}")
+def ops_restore_client(
+    account_no: str,
+    _user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Restore ARCHIVED rows to PENDING for an account."""
+    from google.cloud import bigquery as _bqmod
+    from core.bq_loader import PROJECT, _bq
+    bq = _bq()
+    sql = f"""
+        UPDATE `{PROJECT}.vtx_accounting.approval_queue`
+        SET status = 'PENDING'
+        WHERE account_no = @account_no
+          AND status = 'ARCHIVED'
+    """
+    job = bq.query(sql, job_config=_bqmod.QueryJobConfig(
+        query_parameters=[_bqmod.ScalarQueryParameter("account_no", "STRING", account_no)]
+    ))
+    job.result()
+    return {"ok": True, "account_no": account_no, "rows_restored": job.num_dml_affected_rows}
 
 
 @app.post("/api/ops/onboard-client")

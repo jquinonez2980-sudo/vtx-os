@@ -202,10 +202,10 @@
 
   <div class="sb-footer">
     <div class="sb-user">
-      <div class="avatar">JK</div>
+      <div class="avatar" id="sb-user-avatar">JQ</div>
       <div class="info">
-        <div class="name">Jordan Kim</div>
-        <div class="role">Senior Bookkeeper</div>
+        <div class="name" id="sb-user-name">Admin</div>
+        <div class="role" id="sb-user-role">Bookkeeper</div>
       </div>
     </div>
   </div>
@@ -240,7 +240,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
   </button>
 
-  <div class="h-avatar" title="Jordan Kim">JK</div>
+  <div class="h-avatar" id="h-avatar" title="Admin">JQ</div>
 </header>
 
 <!-- ══════════════════════════════════════ CLIENT DROPDOWN -->
@@ -520,7 +520,8 @@
     <div class="card">
       <div style="padding:10px 14px;background:var(--page-bg);border-bottom:1px solid var(--card-border);display:flex;gap:8px;align-items:center">
         <input type="checkbox" id="all-select" onchange="toggleAllEntries(this)">
-        <span id="entries-sel-count" style="font:400 12px/1 'Inter',sans-serif;color:var(--t3);flex:1">0 of 12 selected</span>
+        <span id="entries-sel-count" style="font:400 12px/1 'Inter',sans-serif;color:var(--t3);flex:1">0 selected</span>
+        <button class="btn btn-sm" style="background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal)" onclick="approveHighConfidence()">✓ Auto-approve ≥80%</button>
         <button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd)" id="approve-btn" onclick="approveSelected()" disabled>✓ Approve Selected</button>
         <button class="btn btn-danger btn-sm" id="reject-btn" onclick="rejectSelected()" disabled>✕ Reject</button>
         <button class="btn btn-secondary btn-sm" onclick="exportEntries()">↓ Export CSV</button>
@@ -924,9 +925,9 @@ async function fetchLiveForAccount(accountNo, period) {
         const acct = lc.account_masked || lc.client_id || '—';
         CLIENTS.push({
           id: 100 + i,
-          abbr: acct.slice(-4).toUpperCase(),
-          name: lc.client_id || acct,
-          industry: (lc.bank || '—') + ' Account',
+          abbr: (lc.company_name || lc.client_id || acct).replace(/[^A-Z]/gi,'').slice(0,2).toUpperCase() || acct.slice(-2).toUpperCase(),
+          name: lc.company_name || lc.client_id || acct,
+          industry: lc.industry || (lc.bank || '—') + ' Account',
           bank: lc.bank || '—',
           acct: acct,
           unrec: 0, hst: 0, recon: '—', stage: 'review', since: '—',
@@ -1015,12 +1016,24 @@ async function fetchLiveForAccount(accountNo, period) {
       apiFetch('/api/live/summary?period=' + period + clientParam).catch(() => {});
     }
 
+    // Update authenticated user identity (sidebar + header)
+    apiFetch('/api/live/user').then(u => {
+      if (!u || !u.email) return;
+      const name = u.name || (u.email ? u.email.split('@')[0] : 'Admin');
+      const initials = name.trim().split(/\s+/).map(p => p[0]).join('').toUpperCase().slice(0, 2) || u.email.slice(0, 2).toUpperCase();
+      const sbAv = document.getElementById('sb-user-avatar'); if (sbAv) sbAv.textContent = initials;
+      const sbNm = document.getElementById('sb-user-name');   if (sbNm) sbNm.textContent = name;
+      const sbRl = document.getElementById('sb-user-role');   if (sbRl) sbRl.textContent = u.email;
+      const hAv  = document.getElementById('h-avatar');       if (hAv)  { hAv.textContent = initials; hAv.title = name; }
+    }).catch(() => {});
+
     // Watcher + Sage history: show "run to populate" placeholders (no mock data in live mode)
-    const emptyWatcher = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
+    const emptyWatcherPreview = '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
+    const emptyWatcherFull    = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">Run Gmail Watcher to see detection results</td></tr>';
     const el1 = document.getElementById('watcher-preview');
     const el2 = document.getElementById('watcher-full-table');
-    if (el1) el1.innerHTML = emptyWatcher;
-    if (el2) el2.innerHTML = emptyWatcher;
+    if (el1) el1.innerHTML = emptyWatcherPreview;
+    if (el2) el2.innerHTML = emptyWatcherFull;
     const sageHist = document.getElementById('sage-history');
     if (sageHist) sageHist.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No post history — use local _post_je.py to post to Sage 50</td></tr>';
 
@@ -1074,13 +1087,14 @@ async function testConnection() {
 }
 
 // ════════════════════════════════════════ DATA
-const CLIENTS = [
+const MOCK_CLIENTS = [
   { id:1, abbr:'MR', name:'Maple Ridge Interiors Inc.', industry:'Interior Design',  bank:'RBC',  acct:'RBC-7823', unrec:23, hst:4210,  recon:'May 31, 2026', stage:'review', since:'Jan 2026', color:'#0A2540', hstData:[6200,7100,8400,7900,9400,4210] },
   { id:2, abbr:'SS', name:'Summit Stone Group',         industry:'Stone Distribution',bank:'TD',   acct:'TD-3301',  unrec:41, hst:8640,  recon:'May 28, 2026', stage:'post',   since:'Oct 2025', color:'#0C7A6E', hstData:[9100,10200,11800,10500,12800,8640] },
   { id:3, abbr:'HH', name:'Horizon HVAC Ltd.',           industry:'HVAC',             bank:'BMO',  acct:'BMO-9104', unrec:12, hst:2180,  recon:'May 30, 2026', stage:'review', since:'Mar 2026', color:'#2563EB', hstData:[3200,3800,4100,3700,4400,2180] },
   { id:4, abbr:'PL', name:'Parkview Legal LLP',          industry:'Legal',            bank:'RBC',  acct:'RBC-4412', unrec:8,  hst:1450,  recon:'May 31, 2026', stage:'hst',    since:'Nov 2025', color:'#7C3AED', hstData:[2100,2400,2600,2200,2900,1450] },
   { id:5, abbr:'GA', name:'GlassHouse Architecture',     industry:'Architecture',     bank:'Amex', acct:'Amex-8871',unrec:0,  hst:0,     recon:'—',            stage:'onboarding',since:'Jun 2026',color:'#B45309', hstData:[0,0,0,0,0,0] },
 ];
+const CLIENTS = MOCK_CLIENTS.slice();
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const ENTRIES = [
   { id:1,  date:'Jun 3',  desc:'RBC Chequing — e-Transfer Received',       client:'Maple Ridge Interiors', debit:2450.00, credit:0,       cat:'Revenue',           conf:98, status:'pending' },
@@ -1154,6 +1168,7 @@ function switchView(id) {
   if (id === 'settings') updateModeBanner();
   if (id === 'sage') loadUnposted();
   if (id === 'clients') renderClientsList();
+  if (id === 'hst' && getToken()) fetchLiveHST(currentPeriod);
   closeSidebar(); // auto-close on mobile after selecting a view
 }
 
@@ -1208,11 +1223,16 @@ function setClient(c) {
   document.getElementById('cq-hst').textContent = '$' + c.hst.toLocaleString();
   document.getElementById('cq-recon').textContent = c.recon;
   document.getElementById('cq-client-watcher').textContent = c.name + ' · ' + c.bank;
+  // Auto-populate Sage 50 posting fields
+  const acctInput = document.getElementById('sage-account-no');
+  const glInput   = document.getElementById('sage-gl-bank');
+  if (acctInput && c.account_masked) acctInput.value = c.account_masked;
+  if (glInput   && c.gl_bank_account) glInput.value = c.gl_bank_account;
   buildClientDropdown();
   renderHSTChart();
   if (getToken()) {
-    fetchLiveForAccount(c.client_id, currentPeriod);
-    loadUnposted(c.client_id);
+    fetchLiveForAccount(c.account_masked || c.client_id, currentPeriod);
+    loadUnposted(c.account_masked || c.client_id);
   }
 }
 
@@ -1222,7 +1242,7 @@ function filterEntriesByClient(val) {
     fetchLiveForAccount(null, currentPeriod);
   } else {
     const c = CLIENTS.find(c => String(c.id) === String(val));
-    if (c) fetchLiveForAccount(c.client_id, currentPeriod);
+    if (c) fetchLiveForAccount(c.account_masked || c.client_id, currentPeriod);
     else renderEntriesTable();
   }
 }
@@ -1301,18 +1321,19 @@ function renderEntriesTable(tableId) {
   const selSet = tableId === 'entries-table' ? selectedIds : dashSelIds;
   tbody.innerHTML = rows.map(e =>
     '<tr class="' + (selSet.has(e.id)?'selected':'') + '" id="erow-' + e.id + '-' + tableId + '">' +
-    '<td><input type="checkbox" ' + (selSet.has(e.id)?'checked':'') + ' onchange="toggleEntry(' + e.id + ',\'' + tableId + '\',this)"></td>' +
-    '<td><span class="mono">' + e.date + '</span></td>' +
-    '<td><div style="font-weight:500">' + e.desc + '</div><div class="td-sub">' + e.client + '</div></td>' +
-    (tableId==='entries-table' ? '<td style="font-size:12px;color:var(--t2)">' + e.client + '</td>' : '') +
+    '<td><input type="checkbox" ' + (selSet.has(e.id)?'checked':'') + ' onchange="toggleEntry(' + JSON.stringify(e.id) + ',\'' + tableId + '\',this)"></td>' +
+    '<td><span class="mono">' + escHtml(e.date) + '</span></td>' +
+    '<td><div style="font-weight:500">' + escHtml(e.desc) + '</div><div class="td-sub">' + escHtml(e.client) + '</div></td>' +
+    (tableId==='entries-table' ? '<td style="font-size:12px;color:var(--t2)">' + escHtml(e.client) + '</td>' : '') +
     '<td style="font-weight:600;color:' + (e.debit>0?'var(--green)':'var(--t4)') + '">' + (e.debit>0?'$'+e.debit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
     '<td style="font-weight:600;color:' + (e.credit>0?'var(--red)':'var(--t4)') + '">' + (e.credit>0?'$'+e.credit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
-    '<td><span class="badge badge-navy">' + e.cat + '</span></td>' +
+    '<td><span class="badge badge-navy">' + escHtml(e.cat) + '</span></td>' +
     '<td>' + conf(e.conf) + '</td>' +
     '<td>' + statusBadge(e.status) + '</td>' +
-    '<td><button class="btn btn-ghost btn-sm" onclick="openEntryModal(' + e.id + ')" style="font-size:11px">Detail</button></td>' +
+    '<td><button class="btn btn-ghost btn-sm" onclick="openEntryModal(' + JSON.stringify(e.id) + ')" style="font-size:11px">Detail</button></td>' +
     '</tr>'
   ).join('') || '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--t3);font-size:13px">All entries approved for this period ✓</td></tr>';
+  if (tableId === 'entries-table') updateEntriesToolbar('entries-table');
 }
 
 function renderDashEntries() {
@@ -1389,6 +1410,26 @@ function rejectSelected() {
   const n = selectedIds.size; selectedIds.clear();
   renderEntriesTable(); updateEntriesToolbar('entries-table');
   showToast(n + ' entr' + (n===1?'y':'ies') + ' flagged for manual review', 'warning');
+}
+async function approveHighConfidence() {
+  const highConf = ENTRIES.filter(e => e.status !== 'approved' && e.conf >= 80);
+  if (!highConf.length) { showToast('No entries with ≥80% confidence to approve', 'info'); return; }
+  const n = highConf.length;
+  if (!confirm('Auto-approve ' + n + ' entries with ≥80% confidence?')) return;
+  highConf.forEach(e => { e.status = 'approved'; });
+  if (getToken()) {
+    try {
+      await Promise.allSettled(highConf.map(e =>
+        apiFetch('/api/live/approvals/' + encodeURIComponent(e.queue_id || e.id) + '/approve', {
+          method: 'POST',
+          body: JSON.stringify({ final_gl_no: e.cat || '9999' }),
+        }).catch(() => {})
+      ));
+    } catch (_) {}
+  }
+  selectedIds.clear();
+  renderEntriesTable(); renderDashEntries();
+  showToast(n + ' high-confidence entr' + (n===1?'y':'ies') + ' approved', 'success');
 }
 async function approveDash() {
   const n = dashSelIds.size;
@@ -1474,18 +1515,45 @@ function hideSignIn() {
   const el = document.getElementById('signin-overlay');
   if (el) el.classList.add('hidden');
 }
-function signIn() {
+async function signIn() {
   const val = (document.getElementById('signin-token-input')?.value || '').trim();
   if (!val) { showToast('Enter your access key first', 'warning'); return; }
+  showToast('Validating access key…', 'info');
+  try {
+    const resp = await fetch(API_BASE + '/api/live/user', {
+      headers: { 'Authorization': 'Bearer ' + val }
+    });
+    if (!resp.ok) {
+      showToast('Invalid access key — please try again', 'warning');
+      return;
+    }
+  } catch (e) {
+    showToast('Could not reach server: ' + (e.message || 'network error'), 'warning');
+    return;
+  }
   setToken(val);
   hideSignIn();
   updateModeBanner();
-  showToast('Connecting to live data…', 'success');
+  showToast('Connected to live data', 'success');
   fetchLiveForAccount(null, currentPeriod);
   loadUnposted();
 }
 function continueDemo() {
   hideSignIn();
+  // Reset CLIENTS to mock data if live mode overwrote it
+  if (CLIENTS.length === 0 || CLIENTS[0].id >= 100) {
+    CLIENTS.length = 0;
+    MOCK_CLIENTS.forEach(c => CLIENTS.push(c));
+  }
+  renderActivity();
+  renderWatcherPreview();
+  renderWatcherFull();
+  renderDashEntries();
+  renderEntriesTable();
+  renderHSTByClient();
+  renderSageHistory();
+  renderClientsList();
+  buildClientDropdown();
   showToast('Demo mode active — Settings → add token to connect live data', 'info');
 }
 
@@ -1534,16 +1602,27 @@ function renderUnpostedTable() {
   }).join('');
 }
 
-// ════════════════════════════════════════ ARCHIVE CLIENT
-async function archiveClient(clientId) {
-  if (!confirm('Archive all BQ records for client "' + clientId + '"?\n\nThis marks them ARCHIVED and removes them from active queues.')) return;
+// ════════════════════════════════════════ ARCHIVE / RESTORE CLIENT
+async function archiveClient(accountNo) {
+  if (!confirm('Archive all BQ records for "' + accountNo + '"?\n\nThis marks them ARCHIVED and removes them from active queues. You can restore later.')) return;
   try {
-    const result = await apiFetch('/api/ops/archive-client/' + encodeURIComponent(clientId), { method: 'POST' });
-    showToast('Client "' + clientId + '" archived (' + (result.rows_archived || 0) + ' records)', 'success');
+    const result = await apiFetch('/api/ops/archive-client/' + encodeURIComponent(accountNo), { method: 'POST' });
+    showToast('"' + accountNo + '" archived (' + (result.rows_archived || 0) + ' records)', 'success');
     fetchLiveForAccount(null, currentPeriod);
     loadUnposted();
   } catch (err) {
     showToast('Archive failed: ' + err.message, 'warning');
+  }
+}
+async function restoreClient(accountNo) {
+  if (!confirm('Restore archived records for "' + accountNo + '"?\n\nThis moves them back to PENDING.')) return;
+  try {
+    const result = await apiFetch('/api/ops/restore-client/' + encodeURIComponent(accountNo), { method: 'POST' });
+    showToast('"' + accountNo + '" restored (' + (result.rows_restored || 0) + ' records)', 'success');
+    fetchLiveForAccount(null, currentPeriod);
+    loadUnposted();
+  } catch (err) {
+    showToast('Restore failed: ' + err.message, 'warning');
   }
 }
 
@@ -1722,16 +1801,49 @@ function renderHSTChart() {
 }
 
 // ════════════════════════════════════════ HST BY CLIENT
+let _liveHSTRows = [];
+
+async function fetchLiveHST(period) {
+  if (!getToken()) return;
+  try {
+    const rows = await apiFetch('/api/live/hst?period=' + encodeURIComponent(period));
+    if (Array.isArray(rows)) {
+      _liveHSTRows = rows;
+      renderHSTByClient();
+    }
+  } catch (_) {}
+}
+
 function renderHSTByClient() {
   const tbody = document.getElementById('hst-by-client');
   if (!tbody) return;
+  if (getToken() && _liveHSTRows.length > 0) {
+    // Render live HST lines grouped by account_no
+    const byAcct = {};
+    _liveHSTRows.forEach(r => {
+      const k = r.account_no || r.client_id || '—';
+      if (!byAcct[k]) byAcct[k] = { name: k, collected: 0, owing: 0 };
+      const amt = parseFloat(r.hst_collected || r.amount || 0);
+      const net = parseFloat(r.hst_owing || r.net_hst || 0);
+      byAcct[k].collected += amt;
+      byAcct[k].owing += net || Math.round(amt * 0.74);
+    });
+    tbody.innerHTML = Object.values(byAcct).map(a =>
+      '<tr><td><div style="font-weight:500">' + escHtml(a.name) + '</div></td>' +
+      '<td style="font-weight:600">$' + a.collected.toLocaleString('en',{minimumFractionDigits:2}) + '</td>' +
+      '<td style="font-weight:600;color:var(--red)">$' + a.owing.toLocaleString('en',{minimumFractionDigits:2}) + '</td>' +
+      '<td><span class="badge badge-gold badge-dot">Due ' + (period || fmtMonth()) + '</span></td></tr>'
+    ).join('') || '<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No HST data for this period</td></tr>';
+    return;
+  }
+  // Demo mode: use mock client data
   tbody.innerHTML = CLIENTS.filter(c=>c.hst>0).map(c => {
     const owing = Math.round(c.hst * 0.74);
     return '<tr><td><div style="font-weight:500">' + c.name + '</div><div class="td-sub">' + c.industry + '</div></td>' +
       '<td style="font-weight:600">$' + c.hst.toLocaleString() + '</td>' +
       '<td style="font-weight:600;color:var(--red)">$' + owing.toLocaleString() + '</td>' +
       '<td><span class="badge badge-gold badge-dot">Due Jun 30</span></td></tr>';
-  }).join('');
+  }).join('') || '<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No HST data</td></tr>';
 }
 
 // ════════════════════════════════════════ SAGE HISTORY
@@ -1787,18 +1899,21 @@ function renderClientsList() {
   const list = document.getElementById('clients-list');
   if (!list) return;
   const isLive = !!getToken();
+  const n = CLIENTS.length;
+  const countSub = document.getElementById('clients-count-sub');
+  if (countSub) countSub.textContent = n + ' active client' + (n !== 1 ? 's' : '') + (isLive ? ' · live' : ' · demo');
   list.innerHTML = CLIENTS.map(c =>
     '<div class="client-row">' +
-    '<div><div class="cr-name">' + c.name + '</div><div class="cr-sub">' + c.acct + ' · ' + c.bank + '</div></div>' +
-    '<div style="color:var(--t2);font-size:12px">' + c.industry + '</div>' +
+    '<div><div class="cr-name">' + escHtml(c.name) + '</div><div class="cr-sub">' + escHtml(c.acct || c.account_masked || '') + ' · ' + escHtml(c.bank || '') + '</div></div>' +
+    '<div style="color:var(--t2);font-size:12px">' + escHtml(c.industry || '—') + '</div>' +
     '<div style="font-weight:600;color:' + (c.unrec>20?'var(--amber)':'var(--t1)') + '">' + (c.unrec||'—') + '</div>' +
     '<div style="font-weight:600;color:' + (c.hst>5000?'var(--red)':'var(--t1)') + '">' + (c.hst?'$'+c.hst.toLocaleString():'—') + '</div>' +
-    '<div style="font-size:12px;color:var(--t2)">' + c.recon + '</div>' +
+    '<div style="font-size:12px;color:var(--t2)">' + escHtml(c.recon || '—') + '</div>' +
     '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
     '<span class="badge ' + (c.stage==='onboarding'?'badge-gold badge-dot':c.stage==='review'?'badge-blue badge-dot':'badge-green badge-dot') + '">' +
-    (c.stage==='onboarding'?'Onboarding':c.stage==='review'?'Review':c.stage==='post'?'Post':'HST') + '</span>' +
+    (c.stage==='onboarding'?'Onboarding':c.stage==='review'?'Review':c.stage==='post'?'Post':'Active') + '</span>' +
     '<button class="btn btn-secondary btn-sm" onclick="setClient(CLIENTS.find(x=>x.id===' + c.id + '));switchView(\'dashboard\')">Open</button>' +
-    (isLive && c.client_id ? '<button class="btn btn-danger btn-sm" onclick="archiveClient(\'' + c.client_id + '\')">Archive</button>' : '') +
+    (isLive ? '<button class="btn btn-danger btn-sm" onclick="archiveClient(\'' + escHtml(c.account_masked || c.client_id || '') + '\')">Archive</button>' : '') +
     '</div></div>'
   ).join('');
 }
@@ -1896,6 +2011,7 @@ if (!getToken()) {
   // Live mode: all data from BQ — mock constants are not rendered
   fetchLiveForAccount(null, currentPeriod);
   loadUnposted();
+  fetchLiveHST(currentPeriod);
 }
 </script>
 </body>
