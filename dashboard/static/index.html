@@ -189,6 +189,7 @@
     <div class="titles">
       <div class="title-main">AcumenAI</div>
       <div class="title-sub">Orchelix · Accounting OS</div>
+      <div id="sb-demo-label" style="display:none;color:var(--gold-700);font-weight:600;font-size:10px;letter-spacing:0.10em;text-transform:uppercase;margin-top:3px">Demo Workspace</div>
     </div>
   </div>
 
@@ -1069,8 +1070,8 @@ function setToken(t) { t ? localStorage.setItem('acumen_token', t) : localStorag
 
 async function apiFetch(path, opts = {}) {
   const token = getToken();
-  const headers = { ...(opts.headers || {}) };
-  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (!token) throw Object.assign(new Error('Demo mode: live data is not available'), { status: 0 });
+  const headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + token };
   const res = await fetch(API_BASE + path, { ...opts, headers });
   if (!res.ok) throw new Error(res.status + ': ' + (await res.text()));
   return res.json();
@@ -1094,6 +1095,8 @@ function updateModeBanner() {
   if (inp && hasToken && !inp.value) inp.value = getToken();
   const apiDisplay = document.getElementById('api-base-display');
   if (apiDisplay) apiDisplay.textContent = API_BASE;
+  const sbDemoLabel = document.getElementById('sb-demo-label');
+  if (sbDemoLabel) sbDemoLabel.style.display = hasToken ? 'none' : '';
 }
 
 let liveClients = [];
@@ -1281,32 +1284,89 @@ async function fetchLiveForAccount(accountNo, period) {
   }
 }
 
+function enterDemoMode() {
+  // Clear auth
+  setToken(null);
+  const inp = document.getElementById('settings-token-input');
+  if (inp) inp.value = '';
+
+  // Full data reset — replace every working array with fresh copies of mock constants
+  CLIENTS.length = 0;
+  MOCK_CLIENTS.forEach(c => CLIENTS.push({...c}));
+  ENTRIES.length = 0;
+  MOCK_ENTRIES.forEach(e => ENTRIES.push({...e}));
+  ACTIVITY.length = 0;
+  MOCK_ACTIVITY.forEach(a => ACTIVITY.push({...a}));
+  WATCHER_DETECTIONS.length = 0;
+  MOCK_WATCHER_DETECTIONS.forEach(w => WATCHER_DETECTIONS.push({...w}));
+  SAGE_HISTORY.length = 0;
+  MOCK_SAGE_HISTORY.forEach(h => SAGE_HISTORY.push({...h}));
+
+  // Clear live-only state
+  _liveHSTRows = [];
+  unpostedEntries = [];
+  liveClients = [];
+  selectedIds = new Set();
+  dashSelIds = new Set();
+
+  // Reset period to demo defaults
+  currentClient = CLIENTS[0];
+  currentMonth = { y: 2026, m: 3 };
+  currentPeriod = '2026-04';
+  ['dash-month-label','entries-month-label','hst-month-label'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = fmtMonth();
+  });
+
+  // Re-render all views from mock data
+  updateModeBanner();
+  buildClientDropdown();
+  renderActivity();
+  renderWatcherPreview();
+  renderWatcherFull();
+  renderDashEntries();
+  renderEntriesTable();
+  renderHSTByClient();
+  renderSageHistory();
+  renderClientsList();
+  renderHSTChart();
+  updatePeriodNotes();
+
+  // Sync KPI counts to mock data
+  const pending = ENTRIES.filter(e => e.status !== 'approved').length;
+  const kpiPending = document.getElementById('kpi-pending');
+  if (kpiPending) kpiPending.textContent = pending;
+  const sbBadge = document.getElementById('sb-pending-badge');
+  if (sbBadge) sbBadge.textContent = pending;
+  const kpiClients = document.getElementById('kpi-clients');
+  if (kpiClients) kpiClients.textContent = CLIENTS.length;
+
+  // Reset agent strip to idle
+  ['gmail','book','hst','post'].forEach(ag => setAgentStatus(ag, 'idle', 'Idle'));
+  const agTs = document.getElementById('agent-strip-ts'); if (agTs) agTs.textContent = '—';
+  const agBadge = document.getElementById('agent-strip-badge'); if (agBadge) agBadge.style.display = 'none';
+
+  showSignIn();
+}
 function saveToken() {
   const val = (document.getElementById('settings-token-input')?.value || '').trim();
-  setToken(val || null);
-  updateModeBanner();
   if (val) {
+    setToken(val);
+    updateModeBanner();
     showToast('Key saved — loading live data…', 'success');
     fetchLiveForAccount(currentClient?.client_id, null);
     loadUnposted();
   } else {
-    showToast('Key cleared · demo mode active', 'info');
+    enterDemoMode();
+    showToast('Key cleared — demo mode active', 'info');
   }
 }
 function clearToken() {
-  setToken(null);
-  const inp = document.getElementById('settings-token-input');
-  if (inp) inp.value = '';
-  updateModeBanner();
-  showToast('Key cleared · demo mode active', 'info');
+  enterDemoMode();
+  showToast('Key cleared — demo mode active', 'info');
 }
 function signOut() {
-  setToken(null);
-  const inp = document.getElementById('settings-token-input');
-  if (inp) inp.value = '';
-  updateModeBanner();
+  enterDemoMode();
   showToast('Signed out — demo mode active', 'info');
-  showSignIn();
 }
 async function testConnection() {
   try {
@@ -1327,7 +1387,7 @@ const MOCK_CLIENTS = [
 ];
 const CLIENTS = MOCK_CLIENTS.slice();
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const ENTRIES = [
+const MOCK_ENTRIES = [
   { id:1,  date:'Jun 3',  desc:'RBC Chequing — e-Transfer Received',       client:'Maple Ridge Interiors', debit:2450.00, credit:0,       cat:'Revenue',           conf:98, status:'pending' },
   { id:2,  date:'Jun 3',  desc:'Atlas Stone Supply Ltd.',                   client:'Summit Stone Group',    debit:0,       credit:8920.50, cat:'Cost of Goods',     conf:95, status:'pending' },
   { id:3,  date:'Jun 2',  desc:'Google Workspace — Monthly Subscription',  client:'Maple Ridge Interiors', debit:0,       credit:86.24,   cat:'Software & IT',     conf:99, status:'pending' },
@@ -1341,7 +1401,8 @@ const ENTRIES = [
   { id:11, date:'May 28', desc:'Toronto Hydro — Electricity',               client:'Summit Stone Group',    debit:0,       credit:982.33,  cat:'Utilities',         conf:98, status:'pending' },
   { id:12, date:'May 27', desc:'Amex — Purchase: Canarm Lighting',          client:'Maple Ridge Interiors', debit:0,       credit:3640.00, cat:'Inventory / FF&E',  conf:88, status:'pending' },
 ];
-const ACTIVITY = [
+const ENTRIES = MOCK_ENTRIES.map(e => ({...e}));
+const MOCK_ACTIVITY = [
   { type:'approve', icon:'✓', color:'var(--green-bg)', iconColor:'var(--green)',   text:'8 entries approved',                  meta:'Summit Stone Group · 4m ago' },
   { type:'watcher', icon:'📧', color:'var(--blue-bg)',  iconColor:'var(--blue)',    text:'Gmail Watcher detected 3 statements', meta:'TD Bank · Maple Ridge · 12m ago' },
   { type:'post',    icon:'→',  color:'#EEF2F6',         iconColor:'var(--navy)',    text:'31 entries posted to Sage 50',        meta:'All clients · 2h ago' },
@@ -1351,20 +1412,23 @@ const ACTIVITY = [
   { type:'watcher', icon:'📧', color:'var(--blue-bg)',  iconColor:'var(--blue)',    text:'RBC statement processed (8 pages)',   meta:'Maple Ridge Interiors · 1d ago' },
   { type:'post',    icon:'→',  color:'#EEF2F6',         iconColor:'var(--navy)',    text:'18 entries posted to Sage 50',        meta:'Summit Stone · 2d ago' },
 ];
-const WATCHER_DETECTIONS = [
+const ACTIVITY = MOCK_ACTIVITY.map(a => ({...a}));
+const MOCK_WATCHER_DETECTIONS = [
   { date:'Jun 3, 9:42am',  client:'Maple Ridge Interiors Inc.', bank:'RBC',  subject:'Your RBC Business Account Statement — June 2026', stmts:1, entries:14, status:'processed' },
   { date:'Jun 3, 9:40am',  client:'Summit Stone Group',         bank:'TD',   subject:'TD Business Banking Statement Available',          stmts:1, entries:22, status:'processed' },
   { date:'Jun 1, 8:15am',  client:'Maple Ridge Interiors Inc.', bank:'Amex', subject:'American Express — Statement Ready',               stmts:1, entries:11, status:'processed' },
   { date:'May 31, 7:58am', client:'Horizon HVAC Ltd.',          bank:'BMO',  subject:'Your BMO Statement for May 2026',                  stmts:1, entries:18, status:'review'    },
   { date:'May 31, 7:55am', client:'Parkview Legal LLP',         bank:'RBC',  subject:'RBC Statement — Business Chequing',                stmts:2, entries:9,  status:'processed' },
 ];
-const SAGE_HISTORY = [
+const WATCHER_DETECTIONS = MOCK_WATCHER_DETECTIONS.map(w => ({...w}));
+const MOCK_SAGE_HISTORY = [
   { posted:'Jun 3, 2026',  client:'Summit Stone Group',    period:'May 2026', entries:22, total:'$42,318.50', by:'Jordan K.' },
   { posted:'Jun 2, 2026',  client:'Maple Ridge Interiors', period:'May 2026', entries:18, total:'$28,640.00', by:'Jordan K.' },
   { posted:'Jun 1, 2026',  client:'Parkview Legal LLP',    period:'May 2026', entries:9,  total:'$18,425.75', by:'AI Agent'  },
   { posted:'May 30, 2026', client:'Horizon HVAC Ltd.',     period:'May 2026', entries:14, total:'$21,100.40', by:'Jordan K.' },
   { posted:'May 15, 2026', client:'Summit Stone Group',    period:'Apr 2026', entries:19, total:'$38,200.00', by:'Jordan K.' },
 ];
+const SAGE_HISTORY = MOCK_SAGE_HISTORY.map(h => ({...h}));
 
 // ════════════════════════════════════════ STATE
 let currentClient   = CLIENTS[0];
@@ -1805,20 +1869,6 @@ async function signIn() {
 }
 function continueDemo() {
   hideSignIn();
-  // Reset CLIENTS to mock data if live mode overwrote it
-  if (CLIENTS.length === 0 || CLIENTS[0].id >= 100) {
-    CLIENTS.length = 0;
-    MOCK_CLIENTS.forEach(c => CLIENTS.push(c));
-  }
-  renderActivity();
-  renderWatcherPreview();
-  renderWatcherFull();
-  renderDashEntries();
-  renderEntriesTable();
-  renderHSTByClient();
-  renderSageHistory();
-  renderClientsList();
-  buildClientDropdown();
   showToast('Demo mode active — Settings → add token to connect live data', 'info');
 }
 
