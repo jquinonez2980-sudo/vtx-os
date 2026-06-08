@@ -100,11 +100,13 @@ def demo_run() -> dict[str, Any]:
 
 @app.get("/api/live/clients")
 def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
+    # Try the local registry CSV first (works when running locally or on a machine
+    # with the R: drive mounted). Falls back to BQ discovery when it's not reachable.
     try:
         from core.client_registry import load_registry
         registry = load_registry()
         configs = registry.values() if isinstance(registry, dict) else registry
-        return [
+        result = [
             {
                 "client_id": getattr(c, "client_id", None),
                 "account_masked": getattr(c, "account_masked", None),
@@ -112,9 +114,35 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
                 "gl_bank_account": getattr(c, "gl_bank_account", None),
             }
             for c in configs
+            if getattr(c, "client_id", None)
+        ]
+        if result:
+            return result
+    except Exception:
+        pass
+
+    # Fallback: discover distinct clients from BQ approval_queue
+    try:
+        from core.bq_loader import PROJECT, _bq
+        rows = list(
+            _bq().query(
+                f"SELECT DISTINCT client_id, account_no "
+                f"FROM `{PROJECT}.vtx_accounting.approval_queue` "
+                f"WHERE client_id IS NOT NULL AND status != 'ARCHIVED' "
+                f"ORDER BY client_id"
+            ).result()
+        )
+        return [
+            {
+                "client_id": r.client_id,
+                "account_masked": r.account_no,
+                "bank": None,
+                "gl_bank_account": None,
+                "source": "bq_discovery",
+            }
+            for r in rows
         ]
     except Exception:
-        # Registry file may be absent in some environments — degrade gracefully.
         return []
 
 
