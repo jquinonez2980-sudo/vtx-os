@@ -126,17 +126,17 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
         from core.bq_loader import PROJECT, _bq
         rows = list(
             _bq().query(
-                f"SELECT DISTINCT client_id, account_no "
+                f"SELECT DISTINCT account_no, bank_code "
                 f"FROM `{PROJECT}.vtx_accounting.approval_queue` "
-                f"WHERE client_id IS NOT NULL AND status != 'ARCHIVED' "
-                f"ORDER BY client_id"
+                f"WHERE account_no IS NOT NULL AND status != 'ARCHIVED' "
+                f"ORDER BY account_no"
             ).result()
         )
         return [
             {
-                "client_id": r.client_id,
+                "client_id": r.account_no,
                 "account_masked": r.account_no,
-                "bank": None,
+                "bank": r.bank_code,
                 "gl_bank_account": None,
                 "source": "bq_discovery",
             }

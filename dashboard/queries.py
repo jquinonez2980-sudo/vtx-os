@@ -159,11 +159,11 @@ def unposted(client_id: str | None = None, limit: int = 200) -> list[dict[str, A
     where = "status = 'APPROVED'"
     params: list = []
     if client_id:
-        where += " AND client_id = @client_id"
-        params.append(bigquery.ScalarQueryParameter("client_id", "STRING", client_id))
+        where += " AND account_no = @account_no"
+        params.append(bigquery.ScalarQueryParameter("account_no", "STRING", client_id))
     sql = f"""
         SELECT queue_id, period, txn_date, description, amount,
-               gl_account_no, confidence, account_no, client_id,
+               suggested_gl_no, suggested_gl_name, confidence, account_no, bank_code,
                final_gl_no, reviewer_email, reviewed_at
         FROM `{_ACC}.approval_queue`
         WHERE {where}
