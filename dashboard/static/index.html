@@ -849,9 +849,138 @@
 
   <!-- ── REPORTS ── -->
   <div class="view" id="view-reports">
-    <div class="view-header"><div class="vh-left"><div class="vh-title">Reports &amp; Analytics</div><div class="vh-sub">Coming soon in the next release</div></div></div>
-    <div class="card"><div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Report builder coming in Q3 2026</div></div>
-  </div>
+    <div class="view-header">
+      <div class="vh-left">
+        <div class="vh-title">Reports &amp; Analytics</div>
+        <div class="vh-sub" id="reports-sub">Synthetic demo data · May 2026</div>
+      </div>
+      <div class="vh-actions">
+        <span id="reports-demo-badge" class="report-demo-badge">◎ Demo data</span>
+        <button class="btn btn-secondary btn-sm" onclick="renderReports()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <div class="report-grid">
+      <!-- P&L Card -->
+      <div class="card" style="padding:20px">
+        <div class="report-card-accent" style="background:linear-gradient(90deg,var(--green),#34D399)"></div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="report-kpi-label">Net Income</div>
+            <div class="report-kpi-val" id="rpt-net-income" style="color:var(--green)">$31,200</div>
+            <div style="font:400 12px/1.5 var(--font-display);color:var(--t3);margin-top:4px" id="rpt-pl-sub">Revenue $142,800 · Expenses $111,600</div>
+          </div>
+          <span class="badge badge-green">P&amp;L</span>
+        </div>
+        <button class="report-expand-btn" onclick="toggleReport('rpt-pl-detail')">View full P&amp;L ↓</button>
+        <div class="report-detail" id="rpt-pl-detail">
+          <table class="report-tbl">
+            <thead><tr><th>Line</th><th>Amount</th></tr></thead>
+            <tbody id="rpt-pl-body">
+              <tr><td>Revenue</td><td>$142,800</td></tr>
+              <tr><td>Cost of Goods Sold</td><td>$(78,400)</td></tr>
+              <tr><td style="font-weight:600">Gross Profit</td><td style="font-weight:600">$64,400</td></tr>
+              <tr><td>Operating Expenses</td><td>$(33,200)</td></tr>
+              <tr><td style="font-weight:700;color:var(--green)">Net Income</td><td style="font-weight:700;color:var(--green)">$31,200</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Balance Sheet Card -->
+      <div class="card" style="padding:20px">
+        <div class="report-card-accent" style="background:linear-gradient(90deg,var(--navy),#3B82F6)"></div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="report-kpi-label">Shareholders' Equity</div>
+            <div class="report-kpi-val" id="rpt-equity" style="color:var(--navy)">$186,300</div>
+            <div style="font:400 12px/1.5 var(--font-display);color:var(--t3);margin-top:4px">Assets $284,500 · Liabilities $98,200</div>
+          </div>
+          <span class="badge badge-navy">Balance Sheet</span>
+        </div>
+        <button class="report-expand-btn" onclick="toggleReport('rpt-bs-detail')">View Balance Sheet ↓</button>
+        <div class="report-detail" id="rpt-bs-detail">
+          <table class="report-tbl">
+            <thead><tr><th>Line</th><th>Amount</th></tr></thead>
+            <tbody>
+              <tr><td>Total Assets</td><td>$284,500</td></tr>
+              <tr><td>Total Liabilities</td><td>$(98,200)</td></tr>
+              <tr><td style="font-weight:700;color:var(--navy)">Shareholders' Equity</td><td style="font-weight:700;color:var(--navy)">$186,300</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- HST Summary Card -->
+      <div class="card" style="padding:20px">
+        <div class="report-card-accent" style="background:linear-gradient(90deg,var(--gold-500),var(--gold-300))"></div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="report-kpi-label">HST Net Owing</div>
+            <div class="report-kpi-val" id="rpt-hst-owing" style="color:var(--gold-700)">$16,200</div>
+            <div style="font:400 12px/1.5 var(--font-display);color:var(--t3);margin-top:4px" id="rpt-hst-due">Due Jun 30, 2026</div>
+          </div>
+          <span class="badge badge-gold">HST Summary</span>
+        </div>
+        <button class="report-expand-btn" onclick="toggleReport('rpt-hst-detail')">View HST Detail ↓</button>
+        <div class="report-detail" id="rpt-hst-detail">
+          <table class="report-tbl">
+            <thead><tr><th>Line</th><th>Amount</th></tr></thead>
+            <tbody id="rpt-hst-body">
+              <tr><td>HST Collected (Output Tax)</td><td>$24,600</td></tr>
+              <tr><td>Input Tax Credits (ITCs)</td><td>$(8,400)</td></tr>
+              <tr><td style="font-weight:700;color:var(--gold-700)">Net HST Owing</td><td style="font-weight:700;color:var(--gold-700)">$16,200</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Reconciliation Card -->
+      <div class="card" style="padding:20px">
+        <div class="report-card-accent" style="background:linear-gradient(90deg,var(--teal),#2DD4BF)"></div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="report-kpi-label">Reconciled Transactions</div>
+            <div class="report-kpi-val" id="rpt-reconciled" style="color:var(--teal)">847</div>
+            <div style="font:400 12px/1.5 var(--font-display);color:var(--t3);margin-top:4px" id="rpt-recon-sub">12 unreconciled · Variance $142.50</div>
+          </div>
+          <span class="badge badge-teal">Reconciliation</span>
+        </div>
+        <button class="report-expand-btn" onclick="toggleReport('rpt-recon-detail')">View Reconciliation ↓</button>
+        <div class="report-detail" id="rpt-recon-detail">
+          <table class="report-tbl">
+            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+            <tbody id="rpt-recon-body">
+              <tr><td>Reconciled Transactions</td><td>847</td></tr>
+              <tr><td style="color:var(--red)">Unreconciled</td><td style="color:var(--red)">12</td></tr>
+              <tr><td>Total Variance</td><td>$142.50</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- /report-grid -->
+
+    <!-- Client Activity (full width) -->
+    <div class="card">
+      <div class="card-head">
+        <div><div class="ch-title">Client Activity</div><div class="ch-sub" id="rpt-activity-sub">May 2026 · all clients</div></div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <table class="tbl" style="table-layout:auto">
+          <thead><tr>
+            <th>Client</th><th>Transactions</th><th>Gross In</th><th>Gross Out</th><th>Pending</th><th>Status</th>
+          </tr></thead>
+          <tbody id="rpt-client-activity-tbody">
+            <tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0A2540;margin-right:8px;vertical-align:middle"></span>Maple Ridge Interiors</td><td>41</td><td>$58,200</td><td>$(44,800)</td><td>23</td><td><span class="badge badge-gold badge-dot">Review</span></td></tr>
+            <tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0C7A6E;margin-right:8px;vertical-align:middle"></span>Summit Stone Group</td><td>63</td><td>$92,400</td><td>$(73,100)</td><td>41</td><td><span class="badge badge-blue badge-dot">Post</span></td></tr>
+            <tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7C3AED;margin-right:8px;vertical-align:middle"></span>Horizon HVAC Ltd.</td><td>38</td><td>$47,600</td><td>$(39,400)</td><td>18</td><td><span class="badge badge-green badge-dot">Current</span></td></tr>
+            <tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#EA580C;margin-right:8px;vertical-align:middle"></span>Parkview Legal LLP</td><td>22</td><td>$34,800</td><td>$(28,200)</td><td>9</td><td><span class="badge badge-green badge-dot">Current</span></td></tr>
+            <tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0891B2;margin-right:8px;vertical-align:middle"></span>GlassHouse Architecture</td><td>29</td><td>$41,200</td><td>$(33,600)</td><td>14</td><td><span class="badge badge-gold badge-dot">Review</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /view-reports -->
 
   <!-- ── SETTINGS ── -->
   <div class="view" id="view-settings">
@@ -876,7 +1005,7 @@
         <div style="margin-bottom:14px">
           <label class="field-label">Display Name</label>
           <div style="display:flex;gap:8px;margin-top:4px">
-            <input class="input" type="text" id="settings-display-name" placeholder="e.g. Jorge Quinonez">
+            <input class="input" type="text" id="settings-display-name" placeholder="Your display name">
             <button class="btn btn-secondary" onclick="saveDisplayName()" style="flex-shrink:0">Save</button>
           </div>
           <div class="field-hint">Shown in the sidebar and header. Stored locally in your browser.</div>
@@ -1345,7 +1474,12 @@ function enterDemoMode() {
   const agTs = document.getElementById('agent-strip-ts'); if (agTs) agTs.textContent = '—';
   const agBadge = document.getElementById('agent-strip-badge'); if (agBadge) agBadge.style.display = 'none';
 
-  showSignIn();
+  // Mask identity — never surface the real localStorage name in demo mode
+  applyUserIdentity('Demo User', '');
+  const _demoInp = document.getElementById('settings-display-name');
+  if (_demoInp) _demoInp.value = '';
+
+  showDemoLanding();
 }
 function saveToken() {
   const val = (document.getElementById('settings-token-input')?.value || '').trim();
@@ -1464,6 +1598,7 @@ function switchView(id) {
   if (id === 'sage') loadUnposted();
   if (id === 'clients') renderClientsList();
   if (id === 'hst' && getToken()) fetchLiveHST(currentPeriod);
+  if (id === 'reports') renderReports();
   closeSidebar(); // auto-close on mobile after selecting a view
 }
 
@@ -1867,10 +2002,7 @@ async function signIn() {
   fetchLiveForAccount(null, null);  // null period → auto-detect most recent from BQ
   loadUnposted();
 }
-function continueDemo() {
-  hideSignIn();
-  showToast('Demo mode active — Settings → add token to connect live data', 'info');
-}
+function continueDemo() { startInteractiveDemo(); }
 
 // ════════════════════════════════════════ UNPOSTED
 let unpostedEntries = [];
@@ -2497,6 +2629,150 @@ function showToast(msg, type) {
   setTimeout(() => { t.classList.add('fade-out'); setTimeout(() => t.remove(), 280); }, 3800);
 }
 
+// ════════════════════════════════════════ VIDEO TOUR
+// Paste a YouTube embed URL (https://www.youtube-nocookie.com/embed/VIDEO_ID)
+// or a self-hosted MP4 path. Leave empty to show the placeholder card.
+const DEMO_VIDEO_SRC = '';
+const DEMO_CHAPTERS = [
+  { label: 'Client Onboarding', t: 0,   ts: '0:00'  },
+  { label: 'Gmail Watcher',     t: 80,  ts: '1:20'  },
+  { label: 'Statement Scan',    t: 165, ts: '2:45'  },
+  { label: 'Review Entries',    t: 250, ts: '4:10'  },
+  { label: 'HST Agent',         t: 335, ts: '5:35'  },
+  { label: 'Sage 50 Posting',   t: 420, ts: '7:00'  },
+  { label: 'Reports',           t: 510, ts: '8:30'  },
+  { label: 'Dashboard',         t: 615, ts: '10:15' },
+];
+
+// ════════════════════════════════════════ REPORT MOCK DATA
+const MOCK_REPORTS = {
+  pl:   { revenue:142800, cogs:78400, gross:64400, expenses:33200, net:31200 },
+  bs:   { assets:284500, liabilities:98200, equity:186300 },
+  hst:  { collected:24600, paid:8400, owing:16200, due:'Jun 30, 2026' },
+  recon:{ reconciled:847, unreconciled:12, variance:'$142.50' },
+};
+
+// ════════════════════════════════════════ DEMO LANDING
+function showDemoLanding() {
+  document.getElementById('demo-landing')?.classList.remove('hidden');
+  document.getElementById('signin-overlay')?.classList.add('hidden');
+}
+function hideDemoLanding() {
+  document.getElementById('demo-landing')?.classList.add('hidden');
+}
+function startInteractiveDemo() {
+  hideDemoLanding();
+  hideSignIn();
+  showToast('Demo mode active — exploring synthetic AcumenAI data', 'info');
+}
+
+// ════════════════════════════════════════ VIDEO TOUR PLAYER
+function openVideoTour() {
+  const modal = document.getElementById('video-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  const iframe = document.getElementById('demo-video-iframe');
+  const ph     = document.getElementById('video-placeholder');
+  if (iframe) {
+    if (DEMO_VIDEO_SRC) {
+      const sep = DEMO_VIDEO_SRC.includes('?') ? '&' : '?';
+      iframe.src = DEMO_VIDEO_SRC.includes('youtu')
+        ? DEMO_VIDEO_SRC + sep + 'autoplay=1&rel=0&modestbranding=1&enablejsapi=1'
+        : DEMO_VIDEO_SRC;
+      if (ph) ph.style.display = 'none';
+    } else {
+      if (ph) ph.style.display = 'flex';
+    }
+  }
+  renderChapterNav();
+}
+function closeVideoTour() {
+  const modal = document.getElementById('video-modal');
+  if (modal) modal.classList.add('hidden');
+  document.body.style.overflow = '';
+  const iframe = document.getElementById('demo-video-iframe');
+  if (iframe) iframe.src = '';
+}
+function seekChapter(t, btn) {
+  const iframe = document.getElementById('demo-video-iframe');
+  if (iframe && iframe.src) {
+    iframe.contentWindow?.postMessage(
+      JSON.stringify({ event:'command', func:'seekTo', args:[t, true] }), '*');
+  }
+  document.querySelectorAll('.chapter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+function renderChapterNav() {
+  const nav = document.getElementById('chapter-nav');
+  if (!nav) return;
+  nav.innerHTML = DEMO_CHAPTERS.map((ch, i) =>
+    '<button class="chapter-btn' + (i===0?' active':'') + '" onclick="seekChapter(' + ch.t + ',this)">' +
+    '<span style="opacity:0.50;font-size:10px;margin-right:5px">' + escHtml(ch.ts) + '</span>' +
+    escHtml(ch.label) + '</button>'
+  ).join('');
+}
+
+// ════════════════════════════════════════ REPORTS
+function toggleReport(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const isOpen = el.classList.toggle('open');
+  const btn = el.previousElementSibling;
+  if (btn && btn.classList.contains('report-expand-btn')) {
+    btn.textContent = btn.textContent.replace(isOpen ? '↓' : '↑', isOpen ? '↑' : '↓');
+  }
+}
+async function renderReports() {
+  const sub   = document.getElementById('reports-sub');
+  const badge = document.getElementById('reports-demo-badge');
+  if (!getToken()) {
+    if (sub)   sub.textContent   = 'Synthetic demo data · May 2026';
+    if (badge) badge.style.display = '';
+    renderReportCards(null, null, null);
+    return;
+  }
+  if (badge) badge.style.display = 'none';
+  if (sub) sub.textContent = 'Live data · ' + (currentPeriod || '—');
+  try {
+    const [sumRes, hstRes, reconRes] = await Promise.allSettled([
+      apiFetch('/api/live/summary?period=' + currentPeriod),
+      apiFetch('/api/live/hst?period=' + currentPeriod),
+      apiFetch('/api/live/reconciliation?period=' + currentPeriod),
+    ]);
+    renderReportCards(
+      sumRes.status   === 'fulfilled' ? sumRes.value   : null,
+      hstRes.status   === 'fulfilled' ? hstRes.value   : null,
+      reconRes.status === 'fulfilled' ? reconRes.value : null
+    );
+  } catch (_) { renderReportCards(null, null, null); }
+}
+function renderReportCards(summary, hst, recon) {
+  const fmt = n => '$' + Number(n).toLocaleString('en-CA');
+  // P&L
+  const net = summary?.net_income ?? MOCK_REPORTS.pl.net;
+  const rev = summary?.total_revenue ?? MOCK_REPORTS.pl.revenue;
+  const exp = summary?.total_expenses ?? (MOCK_REPORTS.pl.cogs + MOCK_REPORTS.pl.expenses);
+  const niEl = document.getElementById('rpt-net-income');
+  if (niEl) niEl.textContent = fmt(net);
+  const plSub = document.getElementById('rpt-pl-sub');
+  if (plSub) plSub.textContent = 'Revenue ' + fmt(rev) + ' · Expenses ' + fmt(exp);
+  // HST
+  const owing = hst?.net_owing ?? hst?.hst_owing ?? MOCK_REPORTS.hst.owing;
+  const due   = hst?.filing_due ?? MOCK_REPORTS.hst.due;
+  const hstEl = document.getElementById('rpt-hst-owing');
+  if (hstEl) hstEl.textContent = fmt(owing);
+  const dueEl = document.getElementById('rpt-hst-due');
+  if (dueEl) dueEl.textContent = 'Due ' + (due || '—');
+  // Reconciliation
+  const rec   = recon?.reconciled_count   ?? MOCK_REPORTS.recon.reconciled;
+  const unrec = recon?.unreconciled_count ?? MOCK_REPORTS.recon.unreconciled;
+  const recEl = document.getElementById('rpt-reconciled');
+  if (recEl) recEl.textContent = rec;
+  const subEl = document.getElementById('rpt-recon-sub');
+  if (subEl) subEl.textContent = unrec + ' unreconciled · Variance ' + (recon?.variance ?? MOCK_REPORTS.recon.variance);
+}
+
 // ════════════════════════════════════════ INIT
 buildClientDropdown();
 renderHSTChart();
@@ -2513,7 +2789,7 @@ if (_savedName) applyUserIdentity(_savedName, null);
 const _dnInp = document.getElementById('settings-display-name');
 if (_dnInp && _savedName) _dnInp.value = _savedName;
 if (!getToken()) {
-  // Demo mode: render all views from mock constants only — no BQ calls
+  // Demo mode: render all views from mock constants, then show demo landing page
   renderActivity();
   renderWatcherPreview();
   renderWatcherFull();
@@ -2522,13 +2798,80 @@ if (!getToken()) {
   renderHSTByClient();
   renderSageHistory();
   renderClientsList();
-  showSignIn();
+  // Always override identity in demo mode — never show real localStorage name
+  applyUserIdentity('Demo User', '');
+  const _demoInpInit = document.getElementById('settings-display-name');
+  if (_demoInpInit) _demoInpInit.value = '';
+  showDemoLanding();
 } else {
   // Live mode: all data from BQ — null period triggers auto-detect of most recent period
   fetchLiveForAccount(null, null);
   loadUnposted();
   fetchLiveHST(currentPeriod);
 }
+// Close video modal on Escape
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVideoTour(); });
 </script>
+
+<!-- ══════════════════════════════════════ DEMO LANDING PAGE -->
+<div id="demo-landing" class="demo-landing hidden">
+  <div class="demo-landing-card">
+    <div class="mark" style="margin:0 auto 24px"></div>
+    <div class="signin-title">AcumenAI</div>
+    <div class="signin-sub" style="margin-top:4px;margin-bottom:0">by Orchelix · Accounting OS</div>
+    <p class="demo-landing-tagline">
+      Books that reconcile themselves.<br>
+      See the full workflow — from inbox to Sage 50 — in 10 minutes.
+    </p>
+    <button onclick="openVideoTour()" class="btn demo-tour-btn">
+      ▶&nbsp; Start Product Tour
+    </button>
+    <button onclick="startInteractiveDemo()" class="btn demo-explore-btn">
+      Explore Interactive Demo
+    </button>
+    <a role="button" onclick="hideDemoLanding(); showSignIn()" class="demo-signin-link">
+      Already have access? Sign in →
+    </a>
+    <div class="demo-chapter-pills">
+      <span class="demo-chapter-pill">Client Onboarding</span>
+      <span class="demo-chapter-pill">Gmail Watcher</span>
+      <span class="demo-chapter-pill">Review Entries</span>
+      <span class="demo-chapter-pill">HST Agent</span>
+      <span class="demo-chapter-pill">Sage 50 Posting</span>
+      <span class="demo-chapter-pill">Reports</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════ VIDEO TOUR MODAL -->
+<div id="video-modal" class="video-modal hidden">
+  <button class="video-close-btn" onclick="closeVideoTour()" title="Close (Esc)">✕</button>
+  <div class="video-modal-inner">
+    <div class="video-wrap">
+      <iframe id="demo-video-iframe" allowfullscreen
+              allow="autoplay; encrypted-media" frameborder="0"></iframe>
+      <div id="video-placeholder" class="video-placeholder" style="display:none">
+        <div class="video-placeholder-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+        </div>
+        <div style="font:600 15px/1 var(--font-display);color:rgba(234,242,255,0.55)">Video tour coming soon</div>
+        <div style="font:400 13px/1.5 var(--font-display);color:rgba(234,242,255,0.30);max-width:320px;margin-top:4px">
+          Set <code style="font-family:var(--font-mono);font-size:11px;opacity:0.7">DEMO_VIDEO_SRC</code> in index.html to your YouTube or MP4 URL.
+        </div>
+        <button onclick="startInteractiveDemo(); closeVideoTour();" class="btn btn-primary" style="margin-top:20px">
+          Try Interactive Demo →
+        </button>
+      </div>
+    </div>
+    <div class="chapter-nav" id="chapter-nav"></div>
+    <div class="video-post-cta hidden" id="video-post-cta">
+      <button onclick="startInteractiveDemo(); closeVideoTour();" class="btn btn-primary">Try Interactive Demo</button>
+      <a href="https://www.orchelix.com/book" target="_blank" rel="noopener" class="btn btn-secondary">Book Live Demo</a>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
