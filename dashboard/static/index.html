@@ -1139,11 +1139,12 @@ async function fetchLiveForAccount(accountNo, period) {
       });
       renderEntriesTable();
       renderDashEntries();
-      // Auto-detect period from the most recent approval (only on initial load without explicit period).
-      // After detection, re-fetch with the detected period so entries are scoped correctly.
+      // Auto-detect period: when no explicit period is given, find the most recent period
+      // from the fetched rows and always re-fetch with it — this prevents leaking all
+      // historical rows into ENTRIES when the unfiltered fetch returns multiple periods.
       if (!period && approvals.length > 0) {
         const recent = approvals.map(a => a.period).filter(Boolean).sort().reverse()[0];
-        if (recent && recent !== currentPeriod) {
+        if (recent) {
           currentPeriod = recent;
           const parts = recent.split('-').map(Number);
           currentMonth = { y: parts[0], m: parts[1] - 1 };
@@ -1151,8 +1152,7 @@ async function fetchLiveForAccount(accountNo, period) {
             const el = document.getElementById(id); if (el) el.textContent = fmtMonth();
           });
           updatePeriodNotes();
-          // Re-fetch with detected period so entries are properly filtered
-          fetchLiveForAccount(accountNo, recent);
+          fetchLiveForAccount(accountNo, recent);  // always re-fetch filtered
           return;
         }
       }
@@ -1398,7 +1398,9 @@ function setClient(c) {
   buildClientDropdown();
   renderHSTChart();
   if (getToken()) {
-    fetchLiveForAccount(c.account_masked || c.client_id, currentPeriod);
+    // Pass null period so auto-detect fires and finds the most recent period for this client.
+    // Without this, switching to a client whose data is in a different period shows 0 results.
+    fetchLiveForAccount(c.account_masked || c.client_id, null);
     loadUnposted(c.account_masked || c.client_id);
   }
 }
@@ -1406,10 +1408,10 @@ function setClient(c) {
 function filterEntriesByClient(val) {
   if (!getToken()) { renderEntriesTable(); return; }
   if (!val || val === 'all') {
-    fetchLiveForAccount(null, currentPeriod);
+    fetchLiveForAccount(null, null);
   } else {
     const c = CLIENTS.find(c => String(c.id) === String(val));
-    if (c) fetchLiveForAccount(c.account_masked || c.client_id, currentPeriod);
+    if (c) fetchLiveForAccount(c.account_masked || c.client_id, null);
     else renderEntriesTable();
   }
 }
@@ -1707,7 +1709,7 @@ async function signIn() {
   hideSignIn();
   updateModeBanner();
   showToast('Connected to live data', 'success');
-  fetchLiveForAccount(null, currentPeriod);
+  fetchLiveForAccount(null, null);  // null period → auto-detect most recent from BQ
   loadUnposted();
 }
 function continueDemo() {
