@@ -302,7 +302,7 @@ def live_unposted(
 def ops_run_watcher(
     client: str | None = None,
     period: str | None = None,
-    dry_run: bool = True,
+    dry_run: bool = False,
     _user: dict = Depends(require_user),
 ) -> dict[str, Any]:
     """Run gmail_watcher.py --once in a subprocess; returns stdout/stderr lines."""

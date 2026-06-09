@@ -2197,11 +2197,11 @@ async function runWatcher() {
   logWrap.classList.add('visible');
   log.innerHTML = '';
   document.getElementById('watcher-run-status').textContent = 'Connecting…';
-  appendLogLine(log, '[AcumenAI] Starting Gmail Watcher (dry-run)…', 'info');
+  appendLogLine(log, '[AcumenAI] Starting Gmail Watcher…', 'info');
 
   const clientSel = document.getElementById('watcher-client-select');
   const clientVal = clientSel?.value && clientSel.value !== 'all' ? clientSel.value : null;
-  const qs = new URLSearchParams({ dry_run: 'true' });
+  const qs = new URLSearchParams();
   if (clientVal) {
     const c = CLIENTS.find(x => String(x.id) === String(clientVal));
     if (c?.client_id) qs.set('client', c.client_id);
@@ -2291,7 +2291,7 @@ async function quickRunWatcher() {
   }
   showToast('Running Gmail Watcher for ' + currentClient.name + '…', 'info');
   try {
-    const qs = new URLSearchParams({ dry_run: 'true' });
+    const qs = new URLSearchParams();
     if (currentClient.client_id) qs.set('client', currentClient.client_id);
     const result = await apiFetch('/api/ops/run-watcher?' + qs.toString(), { method: 'POST' });
     if (result.ok) {

@@ -12,7 +12,8 @@ RUN apt-get update \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONUTF8=1 \
     PYTHONIOENCODING=utf-8 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    VTX_CLIENT_REGISTRY=/app/config/client_accounts.csv
 
 WORKDIR /app
 

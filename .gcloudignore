@@ -15,6 +15,7 @@
 data/
 config/project.env
 config/*.json
+# client_accounts.csv is intentionally kept — ships as the Cloud Run registry
 .env
 
 # One-off diagnostics + non-API components
