@@ -1784,8 +1784,8 @@ function renderEntriesTable(tableId) {
   }
   const selSet = tableId === 'entries-table' ? selectedIds : dashSelIds;
   tbody.innerHTML = rows.map(e =>
-    '<tr class="' + (selSet.has(e.id)?'selected':'') + '" id="erow-' + e.id + '-' + tableId + '">' +
-    '<td><input type="checkbox" ' + (selSet.has(e.id)?'checked':'') + ' onchange="toggleEntry(' + JSON.stringify(e.id) + ',\'' + tableId + '\',this)"></td>' +
+    '<tr class="' + (selSet.has(String(e.id))?'selected':'') + '" id="erow-' + escHtml(String(e.id)) + '-' + tableId + '">' +
+    '<td><input type="checkbox" data-entry-id="' + escHtml(String(e.id)) + '" ' + (selSet.has(String(e.id))?'checked':'') + ' onchange="toggleEntry(this.dataset.entryId,\'' + tableId + '\',this)"></td>' +
     '<td><span class="mono">' + escHtml(e.date) + '</span></td>' +
     '<td><div style="font-weight:500">' + escHtml(e.desc) + '</div><div class="td-sub">' + escHtml(e.client) + '</div></td>' +
     (tableId==='entries-table' ? '<td style="font-size:12px;color:var(--t2)">' + escHtml(e.client) + '</td>' : '') +
@@ -1794,7 +1794,7 @@ function renderEntriesTable(tableId) {
     '<td><span class="badge badge-navy">' + escHtml(e.cat) + '</span></td>' +
     '<td>' + conf(e.conf) + '</td>' +
     '<td>' + statusBadge(e.status) + '</td>' +
-    '<td><button class="btn btn-ghost btn-sm" onclick="openEntryModal(' + JSON.stringify(e.id) + ')" style="font-size:11px">Detail</button></td>' +
+    '<td><button class="btn btn-ghost btn-sm" data-entry-id="' + escHtml(String(e.id)) + '" onclick="openEntryModal(this.dataset.entryId)" style="font-size:11px">Detail</button></td>' +
     '</tr>'
   ).join('') || '<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--t3);font-size:13px">All entries approved for this period ✓</td></tr>';
   if (tableId === 'entries-table') updateEntriesToolbar('entries-table');
@@ -1805,8 +1805,8 @@ function renderDashEntries() {
   if (!tbody) return;
   const rows = ENTRIES.filter(e => e.status !== 'approved').slice(0, 5);
   tbody.innerHTML = rows.map(e =>
-    '<tr class="' + (dashSelIds.has(e.id)?'selected':'') + '">' +
-    '<td><input type="checkbox" ' + (dashSelIds.has(e.id)?'checked':'') + ' onchange="toggleDashEntry(' + e.id + ',this)"></td>' +
+    '<tr class="' + (dashSelIds.has(String(e.id))?'selected':'') + '">' +
+    '<td><input type="checkbox" data-entry-id="' + escHtml(String(e.id)) + '" ' + (dashSelIds.has(String(e.id))?'checked':'') + ' onchange="toggleDashEntry(this.dataset.entryId,this)"></td>' +
     '<td><span class="mono">' + e.date + '</span></td>' +
     '<td><div style="font-weight:500">' + e.desc + '</div></td>' +
     '<td style="font-size:12px;color:var(--t2)">' + e.client + '</td>' +
@@ -1821,17 +1821,18 @@ function renderDashEntries() {
 
 function toggleEntry(id, tableId, cb) {
   const set = tableId === 'entries-table' ? selectedIds : dashSelIds;
-  cb.checked ? set.add(id) : set.delete(id);
+  const key = String(id);
+  cb.checked ? set.add(key) : set.delete(key);
   updateEntriesToolbar(tableId);
 }
 function toggleDashEntry(id, cb) { toggleEntry(id,'dash-entries-table',cb); }
 function toggleAllEntries(cb) {
-  ENTRIES.filter(e=>e.status!=='approved').forEach(e => cb.checked ? selectedIds.add(e.id) : selectedIds.delete(e.id));
+  ENTRIES.filter(e=>e.status!=='approved').forEach(e => cb.checked ? selectedIds.add(String(e.id)) : selectedIds.delete(String(e.id)));
   renderEntriesTable();
   updateEntriesToolbar('entries-table');
 }
 function toggleAllDash(cb) {
-  ENTRIES.filter(e=>e.status!=='approved').slice(0,5).forEach(e => cb.checked ? dashSelIds.add(e.id) : dashSelIds.delete(e.id));
+  ENTRIES.filter(e=>e.status!=='approved').slice(0,5).forEach(e => cb.checked ? dashSelIds.add(String(e.id)) : dashSelIds.delete(String(e.id)));
   renderDashEntries();
   updateEntriesToolbar('dash-entries-table');
 }
@@ -1852,12 +1853,12 @@ function updateEntriesToolbar(tableId) {
 async function approveSelected() {
   const n = selectedIds.size;
   const ids = [...selectedIds];
-  ids.forEach(id => { const e = ENTRIES.find(x=>x.id===id); if(e) e.status='approved'; });
+  ids.forEach(id => { const e = ENTRIES.find(x=>String(x.id)===id); if(e) e.status='approved'; });
   selectedIds.clear();
   if (getToken()) {
     try {
       await Promise.allSettled(ids.map(id => {
-        const e = ENTRIES.find(x=>x.id===id);
+        const e = ENTRIES.find(x=>String(x.id)===id);
         if (!e?.queue_id) return Promise.resolve();
         return apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' });
       }));
@@ -1898,12 +1899,12 @@ async function approveHighConfidence() {
 async function approveDash() {
   const n = dashSelIds.size;
   const ids = [...dashSelIds];
-  ids.forEach(id => { const e = ENTRIES.find(x=>x.id===id); if(e) e.status='approved'; });
+  ids.forEach(id => { const e = ENTRIES.find(x=>String(x.id)===id); if(e) e.status='approved'; });
   dashSelIds.clear();
   if (getToken()) {
     try {
       await Promise.allSettled(ids.map(id => {
-        const e = ENTRIES.find(x=>x.id===id);
+        const e = ENTRIES.find(x=>String(x.id)===id);
         if (!e?.queue_id) return Promise.resolve();
         return apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' });
       }));
@@ -1922,7 +1923,7 @@ function exportEntries() { showToast('CSV export prepared — check your downloa
 // ════════════════════════════════════════ ENTRY MODAL
 function openEntryModal(id) {
   currentEntryId = id;
-  const e = ENTRIES.find(x=>x.id===id); if(!e) return;
+  const e = ENTRIES.find(x=>String(x.id)===String(id)); if(!e) return;
   document.getElementById('entry-modal-title').textContent = 'Transaction: ' + e.desc.slice(0,32) + (e.desc.length>32?'…':'');
   document.getElementById('entry-modal-body').innerHTML =
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">' +
@@ -1944,7 +1945,7 @@ function openEntryModal(id) {
 function closeEntryModal() { document.getElementById('modal-entry').classList.remove('open'); }
 async function approveFromModal() {
   if (!currentEntryId) return;
-  const e = ENTRIES.find(x=>x.id===currentEntryId);
+  const e = ENTRIES.find(x=>String(x.id)===String(currentEntryId));
   if (e) {
     e.status = 'approved';
     if (getToken() && e.queue_id) {
