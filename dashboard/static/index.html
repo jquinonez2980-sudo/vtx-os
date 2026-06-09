@@ -1221,7 +1221,7 @@ function updateModeBanner() {
       : '<span class="badge badge-gold badge-dot">Demo mode</span>';
   }
   const inp = document.getElementById('settings-token-input');
-  if (inp && hasToken && !inp.value) inp.value = getToken();
+  if (inp) inp.value = '';
   const apiDisplay = document.getElementById('api-base-display');
   if (apiDisplay) apiDisplay.textContent = API_BASE;
   const sbDemoLabel = document.getElementById('sb-demo-label');
@@ -1304,6 +1304,8 @@ async function fetchLiveForAccount(accountNo, period) {
       document.getElementById('cq-name').textContent = c.name;
       document.getElementById('cq-meta').textContent = c.industry + ' · ' + c.acct;
       document.getElementById('kpi-clients').textContent = CLIENTS.length;
+      const _wSub = document.getElementById('cq-client-watcher');
+      if (_wSub) _wSub.textContent = c.name + ' · ' + (c.bank || c.acct || '—');
     }
 
     // Update entries — only real BQ approval data
@@ -1485,6 +1487,8 @@ function saveToken() {
   const val = (document.getElementById('settings-token-input')?.value || '').trim();
   if (val) {
     setToken(val);
+    const _stInp = document.getElementById('settings-token-input');
+    if (_stInp) _stInp.value = '';
     updateModeBanner();
     showToast('Key saved — loading live data…', 'success');
     fetchLiveForAccount(currentClient?.client_id, null);
@@ -1997,6 +2001,8 @@ async function signIn() {
     return;
   }
   setToken(val);
+  const _siInp = document.getElementById('signin-token-input');
+  if (_siInp) _siInp.value = '';
   hideSignIn();
   updateModeBanner();
   showToast('Connected to live data', 'success');
