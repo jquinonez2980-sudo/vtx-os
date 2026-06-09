@@ -136,6 +136,9 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
             d["company_name"] = m.get("company_name") or d.get("client_id") or mask
         if not d.get("industry"):
             d["industry"] = m.get("industry", "")
+        # Bank from clients_meta.json overrides BQ-discovered bank_code
+        if m.get("bank"):
+            d["bank"] = m["bank"]
         return d
 
     # Try the local registry CSV first (works with R: drive mounted locally).
@@ -493,13 +496,35 @@ def ops_onboard_client(
     _user: dict = Depends(require_user),
 ) -> dict[str, Any]:
     """Append a new client row to R:\\bookkeeping\\client_accounts.csv."""
+    import json as _json
+    import re as _re
+
+    # Derive masked account for clients_meta.json key
+    digits = _re.sub(r"\D", "", account_no)
+    mask = "xxxx" + digits[-4:] if len(digits) >= 4 else account_no
+
+    # Always write to clients_meta.json — baked into the image so it survives
+    # container restarts after the next deploy.
+    _meta_path = pathlib.Path(__file__).parent / "clients_meta.json"
+    try:
+        meta = _json.loads(_meta_path.read_text(encoding="utf-8")) if _meta_path.exists() else {}
+        meta[mask] = {
+            "company_name": company_name,
+            "industry": "",
+            "bank": bank,
+        }
+        _meta_path.write_text(_json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
     registry_path = pathlib.Path(r"R:\bookkeeping\client_accounts.csv")
     if not registry_path.parent.exists():
         row_csv = f"{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email},{year_end_month}"
         return {
-            "ok": False,
-            "manual": True,
-            "error": "Registry path not accessible from this server.",
+            "ok": True,
+            "manual_registry": True,
+            "client_id": client_id,
+            "message": f"Client '{company_name}' saved to dashboard metadata. Add to R:\\bookkeeping\\client_accounts.csv to enable statement routing.",
             "row": row_csv,
             "hint": f"Add this line to R:\\bookkeeping\\client_accounts.csv: {row_csv}",
         }

@@ -2599,12 +2599,13 @@ async function submitOnboarding(e) {
       const result = await apiFetch('/api/ops/onboard-client?' + qs.toString(), { method: 'POST' });
       closeOnboarding();
       if (result.ok) {
-        showToast('Client "' + companyName + '" added to registry (ID: ' + clientId + ')', 'success');
-        setTimeout(() => showToast('Run Gmail Watcher to activate statement detection', 'info'), 1400);
+        showToast('Client "' + companyName + '" onboarded successfully', 'success');
+        if (result.manual_registry) {
+          setTimeout(() => showToast('Also add to client_accounts.csv to enable statement routing', 'info'), 1400);
+        } else {
+          setTimeout(() => showToast('Run Gmail Watcher to activate statement detection', 'info'), 1400);
+        }
         fetchLiveForAccount(null, null);
-      } else if (result.manual) {
-        showToast('Registry not accessible from server — add manually to client_accounts.csv', 'warning');
-        setTimeout(() => showToast('Row: ' + result.row, 'info'), 1000);
       } else {
         showToast(result.error || 'Onboarding error', 'warning');
       }

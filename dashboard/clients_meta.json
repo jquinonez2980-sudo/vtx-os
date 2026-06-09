@@ -2,16 +2,16 @@
   "xxxx5443": {
     "company_name": "Concetta Enterprises Inc.",
     "industry": "Professional Services",
-    "bank_display": "TD Bank / CIBC"
+    "bank": "TD Bank"
   },
   "xxxx1555": {
     "company_name": "Theotherapy",
     "industry": "Healthcare",
-    "bank_display": "RBC"
+    "bank": "RBC"
   },
   "xxxx4733": {
     "company_name": "Theotherapy",
     "industry": "Healthcare",
-    "bank_display": "CIBC"
+    "bank": "BMO"
   }
 }
