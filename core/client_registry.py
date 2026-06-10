@@ -84,6 +84,22 @@ class ClientConfig:
         return "xxxx" + self.account_no[-4:] if self.account_no else "xxxx"
 
 
+def resolve_client(
+    account: str,
+    registry: dict[str, ClientConfig] | None = None,
+) -> ClientConfig | None:
+    """Find a client by full account number OR masked form ('xxxx4733').
+
+    BQ stores the masked form; the registry keys on full digits — every tool
+    that bridges the two needs this exact lookup, so it lives here once.
+    """
+    reg = registry if registry is not None else load_registry()
+    cfg = reg.get(normalize_account(account))
+    if cfg:
+        return cfg
+    return next((c for c in reg.values() if c.account_masked == account), None)
+
+
 def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
     """Load the client registry CSV into {normalized_account_no: ClientConfig}.
 

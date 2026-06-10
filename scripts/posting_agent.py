@@ -115,13 +115,10 @@ def _mark_posted(queue_ids: list[str]) -> int:
 
 def _process_request(req, dry_run: bool, sage_user: str) -> tuple[int, int, int, str]:
     """Returns (posted, skipped, errors, note)."""
-    from core.client_registry import load_registry, normalize_account
+    from core.client_registry import resolve_client
     from ledger import build_bank_entries, connector_for
 
-    reg = load_registry()
-    cfg = next((c for c in reg.values() if c.account_masked == req.account_no), None)
-    if cfg is None and req.account_no:
-        cfg = reg.get(normalize_account(req.account_no))
+    cfg = resolve_client(req.account_no)
     if cfg is None:
         return 0, 0, 1, f"account {req.account_no} not in client registry"
 

@@ -13,11 +13,15 @@ Each bank transaction becomes one balanced BNK journal entry:
     payment  (amount < 0): Dr <gl> / Cr Bank
 GL display codes map to Sage lIds inside ledger/sage50.py (code * 10000).
 
-    # dry-run (reads BQ only, no Sage access):
-    python scripts/_post_je.py --account xxxx1555 --gl-bank 1060 --suspense 5800
+The bank GL comes from the client registry (config/client_accounts.csv /
+R:\\bookkeeping\\client_accounts.csv). Passing a conflicting --gl-bank aborts
+unless --override-gl is given — the 1060/1065 mis-posting guard.
+
+    # dry-run (reads BQ only, no Sage access; GL resolved from the registry):
+    python scripts/_post_je.py --account xxxx1555
     # real post (Sage 50 must be CLOSED):
     VTX_SAGE50_PASSWORD=... python scripts/_post_je.py --account xxxx1555 \
-        --gl-bank 1060 --suspense 5800 --sai "R:\\...\\2025.SAI" --user sysadmin --commit
+        --sai "R:\\...\\2025.SAI" --user sysadmin --commit
 """
 from __future__ import annotations
 
@@ -32,10 +36,36 @@ sys.path.insert(0, str(_ROOT))
 PROJECT = "vtx-accounting-os-prod"
 
 
+def _resolve_gl(cli_gl: str | None, registry_gl: str | None, override: bool) -> str:
+    """The 1060/1065 incident guard: the registry's GL wins; a CLI value that
+    contradicts it aborts unless explicitly overridden."""
+    if registry_gl and cli_gl and cli_gl != registry_gl and not override:
+        raise ValueError(
+            f"--gl-bank {cli_gl} contradicts the client registry ({registry_gl}). "
+            f"This is how the 1060/1065 mis-posting happened. Drop --gl-bank to use "
+            f"the registry value, or pass --override-gl if the registry is wrong "
+            f"(then FIX THE REGISTRY)."
+        )
+    if override and cli_gl:
+        return cli_gl          # the operator explicitly chose to beat the registry
+    gl = registry_gl or cli_gl
+    if not gl:
+        raise ValueError(
+            "No GL bank account: account not found in the client registry and no "
+            "--gl-bank given."
+        )
+    return gl
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--account", required=True, help="masked account_no in BQ, e.g. xxxx1555")
-    ap.add_argument("--gl-bank", required=True, help="bank GL display code, e.g. 1060")
+    ap.add_argument("--gl-bank", default=None,
+                    help="bank GL display code, e.g. 1060. Normally OMIT this — it is "
+                         "resolved from the client registry; a conflicting value aborts.")
+    ap.add_argument("--override-gl", action="store_true",
+                    help="allow --gl-bank to differ from the registry (use only when "
+                         "the registry itself is wrong, then fix the registry)")
     ap.add_argument("--suspense", default="5800", help="suspense GL for needs_review rows")
     ap.add_argument("--sai", default=None)
     ap.add_argument("--user", default="sysadmin")
@@ -58,6 +88,24 @@ def main() -> int:
 
     from ledger import build_bank_entries
     from ledger.sage50 import Sage50Connector, lid
+
+    # ── GL bank account: the registry is the source of truth ────────────────
+    registry_gl = None
+    try:
+        from core.client_registry import resolve_client
+        cfg = resolve_client(args.account)
+        if cfg:
+            registry_gl = cfg.gl_bank_account
+    except Exception as exc:
+        print(f"WARNING: client registry unavailable ({exc}) — "
+              f"falling back to --gl-bank")
+    try:
+        gl_bank = _resolve_gl(args.gl_bank, registry_gl, args.override_gl)
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    src = "registry" if registry_gl and gl_bank == registry_gl else "--gl-bank (OVERRIDE)"
+    print(f"GL bank account: {gl_bank}  [{src}]")
 
     c = bigquery.Client(project=PROJECT)
     date_clause = ""
@@ -83,7 +131,7 @@ def main() -> int:
         "gl": args.suspense if r.needs_review else (r.gl_account_no or args.suspense),
         "queue_id": None,
     } for r in rows]
-    entries = build_bank_entries(build_rows, bank_ref=args.gl_bank,
+    entries = build_bank_entries(build_rows, bank_ref=gl_bank,
                                  suspense_ref=args.suspense)
 
     per_month: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # n, suspense
@@ -93,7 +141,7 @@ def main() -> int:
         per_month[mk][0] += 1
         if r.needs_review:
             per_month[mk][1] += 1
-        gl = next((l.gl_ref for l in e.lines if l.gl_ref != args.gl_bank), args.gl_bank)
+        gl = next((l.gl_ref for l in e.lines if l.gl_ref != gl_bank), gl_bank)
         gl_tally[gl] += 1
 
     skipped_zero = len(rows) - len(entries)

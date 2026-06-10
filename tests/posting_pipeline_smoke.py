@@ -146,6 +146,30 @@ check("JSON-safe dump (datetime -> str)", isinstance(d["requested_at"], str))
 check("lifecycle enum round-trips",
       PostRequest.model_validate({**d, "status": "DONE"}).status is PostRequestStatus.DONE)
 
+# ── 5b. registry-enforced GL (the 1060/1065 incident guard) ─────────────────
+print("\n5b. _resolve_gl + resolve_client")
+from core.client_registry import resolve_client
+from scripts._post_je import _resolve_gl
+
+check("registry GL wins when CLI omitted",   _resolve_gl(None, "1065", False) == "1065")
+check("matching CLI value passes through",   _resolve_gl("1065", "1065", False) == "1065")
+check("CLI-only works when not in registry", _resolve_gl("1060", None, False) == "1060")
+try:
+    _resolve_gl("1060", "1065", False)
+    check("conflicting CLI value aborts", False)
+except ValueError as exc:
+    check("conflicting CLI value aborts", "1060" in str(exc) and "1065" in str(exc))
+check("--override-gl allows the conflict",   _resolve_gl("1060", "1065", True) == "1060")
+try:
+    _resolve_gl(None, None, False)
+    check("no GL anywhere -> error", False)
+except ValueError:
+    check("no GL anywhere -> error", True)
+
+check("resolve_client by full digits", resolve_client("000004733", reg) is c)
+check("resolve_client by masked form", resolve_client("xxxx4733", reg) is c)
+check("resolve_client miss -> None",   resolve_client("xxxx0000", reg) is None)
+
 # ── 6. connector routing ────────────────────────────────────────────────────
 print("\n6. connector_for (platform routing)")
 from dataclasses import replace
