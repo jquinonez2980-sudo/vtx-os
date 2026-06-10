@@ -1,5 +1,5 @@
 {
-  "displayName": "VTX-OS — application ERROR logs",
+  "displayName": "VTX-OS - application ERROR logs",
   "documentation": {
     "content": "ERROR-severity logs from the AcumenAI API or the GCS ingest function. Includes agent audit-fallback errors (BQ-unreachable stderr JSON). Check vtx_audit.audit_log for the matching AGENT_ERROR rows.",
     "mimeType": "text/markdown"

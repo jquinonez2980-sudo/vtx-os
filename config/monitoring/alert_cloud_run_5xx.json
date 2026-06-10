@@ -1,5 +1,5 @@
 {
-  "displayName": "AcumenAI API — 5xx error rate",
+  "displayName": "AcumenAI API - 5xx error rate",
   "documentation": {
     "content": "Cloud Run service acumenai-api is returning server errors. Check: gcloud run services logs read acumenai-api --region=northamerica-northeast2 --limit=50",
     "mimeType": "text/markdown"

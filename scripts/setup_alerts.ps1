@@ -19,18 +19,25 @@ Write-Host "=== VTX-OS Alert Policy Setup ===" -ForegroundColor Cyan
 # 1. Email notification channel (create if missing)
 # ---------------------------------------------------------------------------
 Write-Host "1/2  Ensuring email notification channel for $Email ..." -ForegroundColor Yellow
-$channel = gcloud beta monitoring channels list --project=$PROJECT `
-    --filter="type=email AND labels.email_address='$Email'" `
-    --format="value(name)" | Select-Object -First 1
+# NOTE: server-side --filter syntax is quote-fragile from PowerShell (caused
+# duplicate policies on 2026-06-10) — list everything, match client-side.
+function Find-EmailChannel {
+    $lines = gcloud beta monitoring channels list --project=$PROJECT `
+        --format="csv[no-heading](name,labels.email_address)"
+    foreach ($l in $lines) {
+        $parts = $l -split ","
+        if ($parts.Count -ge 2 -and $parts[1].Trim() -eq $Email) { return $parts[0].Trim() }
+    }
+    return $null
+}
+$channel = Find-EmailChannel
 if (-not $channel) {
     gcloud beta monitoring channels create `
         --display-name="VTX-OS alerts ($Email)" `
         --type=email `
         --channel-labels="email_address=$Email" `
         --project=$PROJECT --quiet
-    $channel = gcloud beta monitoring channels list --project=$PROJECT `
-        --filter="type=email AND labels.email_address='$Email'" `
-        --format="value(name)" | Select-Object -First 1
+    $channel = Find-EmailChannel
 }
 Write-Host "     channel: $channel"
 
@@ -42,17 +49,46 @@ $policies = @(
     "config\monitoring\alert_cloud_run_5xx.json",
     "config\monitoring\alert_error_logs.json"
 )
+if (-not $channel) {
+    Write-Host "     WARNING: no email channel (gcloud beta component missing?)." -ForegroundColor DarkYellow
+    Write-Host "              Policies will be created/updated WITHOUT notifications." -ForegroundColor DarkYellow
+}
+# Snapshot all policies once; match displayName client-side (see note above).
+$allPolicies = gcloud alpha monitoring policies list --project=$PROJECT `
+    --format="csv[no-heading](name,displayName)"
+function Find-Policy([string]$dn) {
+    foreach ($l in $allPolicies) {
+        $idx = $l.IndexOf(",")
+        if ($idx -gt 0 -and $l.Substring($idx + 1).Trim() -eq $dn) {
+            return $l.Substring(0, $idx).Trim()
+        }
+    }
+    return $null
+}
 foreach ($file in $policies) {
     $displayName = (Get-Content $file -Raw | ConvertFrom-Json).displayName
-    $existing = gcloud alpha monitoring policies list --project=$PROJECT `
-        --filter="displayName='$displayName'" --format="value(name)" | Select-Object -First 1
+    $existing = Find-Policy $displayName
     if ($existing) {
-        Write-Host "     EXISTS: $displayName"
+        if ($channel) {
+            # idempotent: ensure the email channel is bound to the existing policy
+            $bound = gcloud alpha monitoring policies describe $existing --project=$PROJECT `
+                --format="value(notificationChannels)"
+            if ($bound -like "*$channel*") {
+                Write-Host "     EXISTS (channel bound): $displayName"
+            } else {
+                gcloud alpha monitoring policies update $existing `
+                    --add-notification-channels=$channel --project=$PROJECT --quiet | Out-Null
+                if ($?) { Write-Host "     UPDATED (channel attached): $displayName" -ForegroundColor Green }
+                else    { Write-Host "     FAILED to attach channel:  $displayName" -ForegroundColor Red }
+            }
+        } else {
+            Write-Host "     EXISTS: $displayName"
+        }
     } else {
-        gcloud alpha monitoring policies create `
-            --policy-from-file=$file `
-            --notification-channels=$channel `
-            --project=$PROJECT --quiet
+        $createArgs = @("alpha", "monitoring", "policies", "create",
+                        "--policy-from-file=$file", "--project=$PROJECT", "--quiet")
+        if ($channel) { $createArgs += "--notification-channels=$channel" }
+        gcloud @createArgs
         if ($?) { Write-Host "     CREATED: $displayName" -ForegroundColor Green }
         else    { Write-Host "     FAILED:  $displayName" -ForegroundColor Red }
     }
