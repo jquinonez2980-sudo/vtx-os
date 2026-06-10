@@ -38,26 +38,6 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 PROJECT = "vtx-accounting-os-prod"
-SUSPENSE_DEFAULT = "5800"
-
-
-def _lid(code: str) -> str:
-    """Sage 50 display code -> 8-digit lId (e.g. '1060' -> '10600000')."""
-    return str(int(code) * 10000)
-
-
-def _backup_sai(sai: Path) -> Path:
-    import shutil
-    from datetime import datetime
-    saj = sai.with_suffix(".SAJ")
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    bdir = sai.parent / "vtx_backup" / f"{sai.stem}_{stamp}"
-    bdir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(sai, bdir / sai.name)
-    if saj.is_dir():
-        shutil.copytree(saj, bdir / saj.name)
-    print(f"[backup] {sai.name} -> {bdir}")
-    return bdir
 
 
 def _post_decision(needs_review: bool, queue_status: str | None) -> bool:
@@ -115,46 +95,6 @@ def _fetch_postable(account_no: str, period: str) -> list[dict]:
     return postable
 
 
-def _build_entries(rows: list[dict], gl_bank: str) -> list[dict]:
-    bank_lid = _lid(gl_bank)
-    entries = []
-    for r in rows:
-        amt = r["amount"]
-        if amt == 0:
-            continue
-        gl_lid = _lid(r["gl"] or SUSPENSE_DEFAULT)
-        absamt = float(abs(amt))
-        desc = (r["description"] or "")[:39]
-        dr, cr = (bank_lid, gl_lid) if amt > 0 else (gl_lid, bank_lid)
-        entries.append({
-            "date": r["txn_date"].isoformat(), "source": "BNK", "comment": desc,
-            "queue_id": r["queue_id"],   # stripped before the bridge call
-            "lines": [
-                {"account_id": dr, "debit": absamt, "credit": 0.0, "comment": desc},
-                {"account_id": cr, "debit": 0.0, "credit": absamt, "comment": desc},
-            ],
-        })
-    return entries
-
-
-def _dedupe_against_sage(entries: list[dict], sai: Path, user: str) -> tuple[list[dict], int]:
-    from datetime import date as _date
-    from sage50.bridge_reader import fetch_gl_transactions
-    d_lo = min(_date.fromisoformat(e["date"]) for e in entries)
-    d_hi = max(_date.fromisoformat(e["date"]) for e in entries)
-    existing_rows = fetch_gl_transactions(
-        start_date=d_lo, end_date=d_hi, sai_file=str(sai), user=user,
-    )
-    existing = {
-        (r.transaction_date.isoformat(), r.description[:39], f"{max(r.debit, r.credit):.2f}")
-        for r in existing_rows
-        if r.source.upper() == "BNK" and r.transaction_date is not None
-    }
-    kept = [e for e in entries
-            if (e["date"], e["comment"], f"{e['lines'][0]['debit']:.2f}") not in existing]
-    return kept, len(entries) - len(kept)
-
-
 def _mark_posted(queue_ids: list[str]) -> int:
     """APPROVED -> POSTED for the queue rows whose entries Sage accepted."""
     ids = [q for q in queue_ids if q]
@@ -176,6 +116,7 @@ def _mark_posted(queue_ids: list[str]) -> int:
 def _process_request(req, dry_run: bool, sage_user: str) -> tuple[int, int, int, str]:
     """Returns (posted, skipped, errors, note)."""
     from core.client_registry import load_registry, normalize_account
+    from ledger import build_bank_entries, connector_for
 
     reg = load_registry()
     cfg = next((c for c in reg.values() if c.account_masked == req.account_no), None)
@@ -184,41 +125,47 @@ def _process_request(req, dry_run: bool, sage_user: str) -> tuple[int, int, int,
     if cfg is None:
         return 0, 0, 1, f"account {req.account_no} not in client registry"
 
-    print(f"  client={cfg.client_id} gl_bank={cfg.gl_bank_account} "
-          f"sai_folder={cfg.sai_folder or cfg.r_folder}")
+    print(f"  client={cfg.client_id} platform={cfg.platform} "
+          f"gl_bank={cfg.gl_bank_account}")
 
     rows = _fetch_postable(req.account_no, req.period)
     if not rows:
         return 0, 0, 0, "nothing approved to post"
-    entries = _build_entries(rows, cfg.gl_bank_account)
+    entries = build_bank_entries(rows, bank_ref=cfg.gl_bank_account)
     print(f"  {len(entries)} approval-cleared entries"
           + (f" for {req.period}" if req.period else ""))
 
-    # Group by calendar year — each year posts to its own .SAI
-    by_year: dict[int, list[dict]] = defaultdict(list)
+    # Sage company files are per fiscal year — one connector per (client, year).
+    by_year: dict[int, list] = defaultdict(list)
     for e in entries:
-        by_year[int(e["date"][:4])].append(e)
+        by_year[e.entry_date.year].append(e)
 
     total_posted = total_skipped = total_errors = 0
     notes = []
     for year in sorted(by_year):
         batch = by_year[year]
-        sai = cfg.sai_path(year)
-        if not sai.exists():
-            notes.append(f"{year}: {sai} missing — create it in Sage 50 "
-                         f"(Maintenance -> Start New Year), {len(batch)} entries held")
+        conn = connector_for(cfg, year, user=sage_user)
+        try:
+            conn.validate()
+        except Exception as exc:
+            notes.append(f"{year}: {exc} — {len(batch)} entries held")
             total_errors += len(batch)
             continue
-        print(f"  [{year}] {len(batch)} entries -> {sai}")
+        print(f"  [{year}] {len(batch)} entries -> {conn.platform}")
         try:
-            batch, skipped = _dedupe_against_sage(batch, sai, sage_user)
+            d_lo = min(e.entry_date for e in batch)
+            d_hi = max(e.entry_date for e in batch)
+            existing = conn.existing_keys(d_lo, d_hi)
         except Exception as exc:
             notes.append(f"{year}: dedupe check failed ({exc}) — held")
             total_errors += len(batch)
             continue
+        before = len(batch)
+        batch = [e for e in batch if conn.key(e) not in existing]
+        skipped = before - len(batch)
         total_skipped += skipped
         if skipped:
-            print(f"  [{year}] {skipped} already in Sage — skipped")
+            print(f"  [{year}] {skipped} already in ledger — skipped")
         if not batch:
             continue
         if dry_run:
@@ -226,18 +173,16 @@ def _process_request(req, dry_run: bool, sage_user: str) -> tuple[int, int, int,
             notes.append(f"{year}: dry-run, {len(batch)} ready")
             continue
 
-        _backup_sai(sai)
-        from sage50.bridge_reader import post_journal_entries
-        clean = [{k: v for k, v in e.items() if k != "queue_id"} for e in batch]
-        res = post_journal_entries(clean, sai_file=str(sai), user=sage_user)
-        posted_n = res.get("posted", 0)
-        errors_n = res.get("errors", 0)
-        total_posted += posted_n
-        total_errors += errors_n
-        # Flip APPROVED -> POSTED only for entries the bridge confirmed
-        ok_idx = [i for i, r in enumerate(res.get("results", [])) if r.get("posted")]
-        flipped = _mark_posted([batch[i]["queue_id"] for i in ok_idx])
-        notes.append(f"{year}: posted={posted_n} errors={errors_n} queue->POSTED={flipped}")
+        bdir = conn.backup()
+        if bdir:
+            print(f"  [backup] -> {bdir}")
+        res = conn.post(batch)
+        total_posted += res.posted
+        total_errors += res.errors
+        # Flip APPROVED -> POSTED only for entries the ledger confirmed
+        ok_ids = [batch[i].queue_id for i, r in enumerate(res.results) if r["posted"]]
+        flipped = _mark_posted(ok_ids)
+        notes.append(f"{year}: posted={res.posted} errors={res.errors} queue->POSTED={flipped}")
 
     return total_posted, total_skipped, total_errors, "; ".join(notes) or "ok"
 

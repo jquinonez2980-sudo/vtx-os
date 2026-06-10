@@ -1,13 +1,15 @@
 """
 tests/posting_pipeline_smoke.py — offline checks for the dashboard→agent posting
-pipeline (Session 21). No GCP auth; nothing touches BQ or Sage.
+pipeline + the platform-neutral ledger layer. No GCP auth; nothing touches BQ
+or Sage.
 
 Covers:
   1. _post_decision() — the approval contract (what may post, what must not)
-  2. _build_entries() — Dr/Cr orientation, comment truncation, zero-amount skip
-  3. _lid() — Sage display code → lId
-  4. ClientConfig.sai_path() + registry sai_folder parsing
+  2. ledger.build_bank_entries() — Dr/Cr orientation, zero-amount skip, suspense
+  3. Sage50Connector — lid(), 39-char key truncation, bridge wire format
+  4. ClientConfig.sai_path() + registry sai_folder/platform parsing
   5. PostRequest model — lifecycle fields, JSON-safe serialization
+  6. connector_for() — platform routing (sage50 live, qbo not-yet, unknown rejected)
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ def check(name: str, cond: bool) -> None:
 
 
 # ── 1. approval contract ────────────────────────────────────────────────────
-from scripts.posting_agent import _build_entries, _lid, _post_decision
+from scripts.posting_agent import _post_decision
 
 print("\n1. _post_decision (approval contract)")
 # auto-approved (needs_review=False)
@@ -52,8 +54,11 @@ check("needs_review, ESCALATED -> held",                 _post_decision(True, "E
 check("needs_review, POSTED -> never re-posts",          _post_decision(True, "POSTED") is False)
 check("status is case-insensitive",                      _post_decision(True, "approved") is True)
 
-# ── 2. entry building ───────────────────────────────────────────────────────
-print("\n2. _build_entries (Dr/Cr orientation)")
+# ── 2. neutral entry building ───────────────────────────────────────────────
+print("\n2. ledger.build_bank_entries (Dr/Cr orientation)")
+from ledger import build_bank_entries
+from ledger.sage50 import Sage50Connector, lid
+
 rows = [
     {"txn_date": date(2026, 1, 5), "description": "CLIENT DEPOSIT",
      "amount": Decimal("1000.00"), "gl": "4020", "queue_id": "q1"},
@@ -64,30 +69,42 @@ rows = [
     {"txn_date": date(2026, 1, 8), "description": "X" * 60,  # over Sage's 39-char limit
      "amount": Decimal("-10.00"), "gl": None, "queue_id": "q4"},
 ]
-entries = _build_entries(rows, gl_bank="1065")
+entries = build_bank_entries(rows, bank_ref="1065")
 check("zero-amount row skipped", len(entries) == 3)
 
-dep = entries[0]
-check("deposit: Dr bank lId",   dep["lines"][0]["account_id"] == "10650000" and dep["lines"][0]["debit"] == 1000.00)
-check("deposit: Cr revenue lId", dep["lines"][1]["account_id"] == "40200000" and dep["lines"][1]["credit"] == 1000.00)
+dep, pay, trunc = entries
+check("deposit: Dr bank ref",    dep.lines[0].gl_ref == "1065" and dep.lines[0].debit == Decimal("1000.00"))
+check("deposit: Cr revenue ref", dep.lines[1].gl_ref == "4020" and dep.lines[1].credit == Decimal("1000.00"))
+check("payment: Dr expense ref", pay.lines[0].gl_ref == "5500" and pay.lines[0].debit == Decimal("250.50"))
+check("payment: Cr bank ref",    pay.lines[1].gl_ref == "1065" and pay.lines[1].credit == Decimal("250.50"))
+check("every entry balances",    all(e.is_balanced() for e in entries))
+check("comment NOT truncated in neutral layer", len(trunc.comment) == 60)
+check("None GL falls back to suspense 5800",    trunc.lines[0].gl_ref == "5800")
+check("queue_id carried for POSTED writeback",  dep.queue_id == "q1")
+check("amounts stay Decimal in neutral layer",  isinstance(dep.lines[0].debit, Decimal))
 
-pay = entries[1]
-check("payment: Dr expense lId", pay["lines"][0]["account_id"] == "55000000" and pay["lines"][0]["debit"] == 250.50)
-check("payment: Cr bank lId",    pay["lines"][1]["account_id"] == "10650000" and pay["lines"][1]["credit"] == 250.50)
-check("every entry balances",
-      all(abs(sum(l["debit"] for l in e["lines"]) - sum(l["credit"] for l in e["lines"])) < 1e-9
-          for e in entries))
+# ── 3. Sage 50 connector specifics ──────────────────────────────────────────
+print("\n3. Sage50Connector (lid, keys, wire format)")
+check("lid 1060 -> 10600000", lid("1060") == "10600000")
+check("lid 1065 -> 10650000", lid("1065") == "10650000")
+check("lid 5800 -> 58000000", lid("5800") == "58000000")
 
-trunc = entries[2]
-check("comment truncated to 39 chars (Sage limit)", len(trunc["comment"]) == 39)
-check("None GL falls back to suspense 5800", trunc["lines"][0]["account_id"] == "58000000")
-check("queue_id carried for POSTED writeback", dep["queue_id"] == "q1")
-check("dates serialized ISO", dep["date"] == "2026-01-05")
+conn = Sage50Connector(r"R:\nowhere\2026.SAI")
+k = conn.key(trunc)
+check("key truncates comment to 39 (matches Sage storage)", k[1] == "X" * 39)
+check("key amount is 2dp string", k == ("2026-01-08", "X" * 39, "10.00"))
 
-print("\n3. _lid")
-check("1060 -> 10600000", _lid("1060") == "10600000")
-check("1065 -> 10650000", _lid("1065") == "10650000")
-check("5800 -> 58000000", _lid("5800") == "58000000")
+wire = Sage50Connector._to_bridge(dep)
+check("wire: lId resolved",          wire["lines"][0]["account_id"] == "10650000")
+check("wire: floats for the bridge", wire["lines"][0]["debit"] == 1000.00)
+check("wire: ISO date + BNK source", wire["date"] == "2026-01-05" and wire["source"] == "BNK")
+check("wire: comment truncated",     len(Sage50Connector._to_bridge(trunc)["comment"]) == 39)
+
+try:
+    conn.validate()
+    check("validate() raises on missing .SAI", False)
+except FileNotFoundError as exc:
+    check("validate() raises on missing .SAI", "Start New Year" in str(exc))
 
 # ── 4. registry sai_folder ──────────────────────────────────────────────────
 print("\n4. ClientConfig.sai_path + registry parsing")
@@ -115,6 +132,7 @@ with tempfile.TemporaryDirectory() as td:
     c = reg["000004733"]   # normalize_account keeps leading zeros (digits-only strip)
     check("registry parses sai_folder column", c.sai_folder == "Canadian Federation of theotherapy")
     check("registry parses gl_bank 1065", c.gl_bank_account == "1065")
+    check("platform defaults to sage50 when column absent", c.platform == "sage50")
 
 # ── 5. PostRequest model ────────────────────────────────────────────────────
 print("\n5. PostRequest model")
@@ -127,6 +145,28 @@ d = req.model_dump(mode="json")
 check("JSON-safe dump (datetime -> str)", isinstance(d["requested_at"], str))
 check("lifecycle enum round-trips",
       PostRequest.model_validate({**d, "status": "DONE"}).status is PostRequestStatus.DONE)
+
+# ── 6. connector routing ────────────────────────────────────────────────────
+print("\n6. connector_for (platform routing)")
+from dataclasses import replace
+
+from ledger import connector_for
+
+c_sage = connector_for(cfg, 2026)
+check("sage50 platform -> Sage50Connector", isinstance(c_sage, Sage50Connector))
+check("connector gets the year's SAI path", str(c_sage.sai).endswith("2026.SAI"))
+
+try:
+    connector_for(replace(cfg, platform="qbo"), 2026)
+    check("qbo -> clear NotImplementedError", False)
+except NotImplementedError as exc:
+    check("qbo -> clear NotImplementedError", "Intuit" in str(exc))
+
+try:
+    connector_for(replace(cfg, platform="xero"), 2026)
+    check("unknown platform rejected", False)
+except ValueError:
+    check("unknown platform rejected", True)
 
 # ── result ──────────────────────────────────────────────────────────────────
 total = _passed + _failed

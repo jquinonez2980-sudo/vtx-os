@@ -1,4 +1,4 @@
-account_no,r_folder,client_id,gl_bank_account,bank,sender_email,sai_folder
-000004733,Theotherapy,theotherapy,1065,BMO,,Canadian Federation of theotherapy
-000001555,Theotherapy,theotherapy,1060,BMO,,Canadian Federation of theotherapy
-000005443,Concetta Enterprises Inc,concetta,1060,TD,veromendez87@hotmail.com,Concetta Enterprises Inc
+account_no,r_folder,client_id,gl_bank_account,bank,sender_email,sai_folder,platform
+000004733,Theotherapy,theotherapy,1065,BMO,,Canadian Federation of theotherapy,sage50
+000001555,Theotherapy,theotherapy,1060,BMO,,Canadian Federation of theotherapy,sage50
+000005443,Concetta Enterprises Inc,concetta,1060,TD,veromendez87@hotmail.com,Concetta Enterprises Inc,sage50

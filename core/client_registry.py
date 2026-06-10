@@ -70,6 +70,8 @@ class ClientConfig:
     year_end_month: int = 0  # 1–12 (e.g. 4 = April 30 year-end); 0 = not set
     sai_folder: str = ""     # Sage company folder under R:\ (may differ from r_folder,
                              # e.g. Theotherapy -> "Canadian Federation of theotherapy")
+    platform: str = "sage50" # accounting platform: "sage50" | "qbo" (selects the
+                             # LedgerConnector; see ledger/__init__.py)
 
     def sai_path(self, year: int) -> Path:
         """Path to the Sage company file for a fiscal year: R:\\<sai_folder>\\<year>.SAI."""
@@ -121,6 +123,7 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
                 sender_email=(row.get("sender_email") or "").strip(),
                 year_end_month=year_end_month,
                 sai_folder=(row.get("sai_folder") or "").strip(),
+                platform=(row.get("platform") or "sage50").strip().lower(),
             )
     return registry
 
