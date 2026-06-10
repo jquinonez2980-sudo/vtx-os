@@ -1,5 +1,8 @@
 .venv/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/prod-writes.log
+Screenshots/
 config/project.env
 config/service-account.json
 config/*.json

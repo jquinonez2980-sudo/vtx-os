@@ -74,18 +74,27 @@ def submit(
 def get_pending(
     limit: int = 100,
     account_no: str | None = None,
+    account_nos: list[str] | None = None,
     period: str | None = None,
 ) -> list[ApprovalItem]:
     """Return PENDING items ordered by date ascending (oldest first).
 
+    account_nos: when a company has multiple bank accounts (e.g. Theotherapy BMO + RBC),
+    pass all masked account numbers to fetch them together.
     period: bookkeeping period string 'YYYY-MM' — filters by the period field
     (the month the statement was ingested), not txn_date (the actual transaction date).
     """
     where = "status = 'PENDING'"
     params: list[bigquery.ScalarQueryParameter] = []
-    if account_no:
-        where += " AND account_no = @account_no"
-        params.append(bigquery.ScalarQueryParameter("account_no", "STRING", account_no))
+    # account_nos takes priority; account_no is kept for backward compat
+    accts = account_nos or ([account_no] if account_no else None)
+    if accts:
+        if len(accts) == 1:
+            where += " AND account_no = @account_no"
+            params.append(bigquery.ScalarQueryParameter("account_no", "STRING", accts[0]))
+        else:
+            where += " AND account_no IN UNNEST(@account_nos)"
+            params.append(bigquery.ArrayQueryParameter("account_nos", "STRING", accts))
     if period:
         where += " AND period = @period"
         params.append(bigquery.ScalarQueryParameter("period", "STRING", period))
