@@ -1,13 +1,17 @@
 """
-scripts/_post_je.py  (one-off helper)
+scripts/_post_je.py  (manual posting helper)
 Post journal entries into Sage 50 from the VERIFIED BigQuery categorized data
 (not by re-parsing CSVs), so Sage matches exactly what was reviewed in BQ.
+
+NOTE: this is the raw manual tool — it posts EVERYTHING in
+bank_transactions_categorized for the account (needs_review rows go to
+suspense) and ignores dashboard approve/reject decisions. For approval-aware
+posting use scripts/posting_agent.py (dashboard "Post to Sage 50" flow).
 
 Each bank transaction becomes one balanced BNK journal entry:
     deposit  (amount > 0): Dr Bank / Cr <gl>
     payment  (amount < 0): Dr <gl> / Cr Bank
-needs_review rows post to the suspense account (reclassify in Sage later).
-GL display codes map to Sage lIds as code * 10000 (verified for this company).
+GL display codes map to Sage lIds inside ledger/sage50.py (code * 10000).
 
     # dry-run (reads BQ only, no Sage access):
     python scripts/_post_je.py --account xxxx1555 --gl-bank 1060 --suspense 5800
@@ -20,18 +24,12 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
-from decimal import Decimal
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 PROJECT = "vtx-accounting-os-prod"
-
-
-def _lid(code: str) -> str:
-    """Sage 50 display code -> 8-digit lId (e.g. '1060' -> '10600000')."""
-    return str(int(code) * 10000)
 
 
 def main() -> int:
@@ -57,6 +55,10 @@ def main() -> int:
     args = ap.parse_args()
 
     from google.cloud import bigquery
+
+    from ledger import build_bank_entries
+    from ledger.sage50 import Sage50Connector, lid
+
     c = bigquery.Client(project=PROJECT)
     date_clause = ""
     bq_params = [bigquery.ScalarQueryParameter("a", "STRING", args.account)]
@@ -73,48 +75,37 @@ def main() -> int:
     if not rows:
         return 1
 
-    bank_lid = _lid(args.gl_bank)
-    entries = []
-    per_month: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])  # n, suspense, gl-count
+    # needs_review rows post to suspense (this tool ignores dashboard decisions)
+    build_rows = [{
+        "txn_date": r.txn_date,
+        "description": r.description,
+        "amount": r.amount,
+        "gl": args.suspense if r.needs_review else (r.gl_account_no or args.suspense),
+        "queue_id": None,
+    } for r in rows]
+    entries = build_bank_entries(build_rows, bank_ref=args.gl_bank,
+                                 suspense_ref=args.suspense)
+
+    per_month: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # n, suspense
     gl_tally: dict[str, int] = defaultdict(int)
-    bad = 0
-    for r in rows:
-        amt = Decimal(str(r.amount))
-        if amt == 0:
-            bad += 1
-            continue
-        gl = args.suspense if r.needs_review else (r.gl_account_no or args.suspense)
-        gl_lid = _lid(gl)
-        absamt = abs(amt)
-        desc = (r.description or "")[:39]
-        if amt > 0:               # deposit: Dr Bank / Cr gl
-            dr, cr = bank_lid, gl_lid
-        else:                     # payment: Dr gl / Cr Bank
-            dr, cr = gl_lid, bank_lid
-        entries.append({
-            "date": r.txn_date.isoformat(),
-            "source": "BNK",
-            "comment": desc,
-            "lines": [
-                {"account_id": dr, "debit": float(absamt), "credit": 0.0, "comment": desc},
-                {"account_id": cr, "debit": 0.0, "credit": float(absamt), "comment": desc},
-            ],
-        })
-        mk = r.txn_date.isoformat()[:7]
+    for r, e in zip([r for r in rows if r.amount != 0], entries):
+        mk = e.entry_date.isoformat()[:7]
         per_month[mk][0] += 1
         if r.needs_review:
             per_month[mk][1] += 1
+        gl = next((l.gl_ref for l in e.lines if l.gl_ref != args.gl_bank), args.gl_bank)
         gl_tally[gl] += 1
 
+    skipped_zero = len(rows) - len(entries)
     print(f"\nBuilt {len(entries)} balanced entries"
-          + (f"  ({bad} zero-amount rows skipped)" if bad else ""))
+          + (f"  ({skipped_zero} zero-amount rows skipped)" if skipped_zero else ""))
     print(f"{'month':<9} {'entries':>7} {'suspense':>9}")
     for mk in sorted(per_month):
-        n, susp, _ = per_month[mk]
+        n, susp = per_month[mk]
         print(f"{mk:<9} {n:>7} {susp:>9}")
     print("\nentries by GL credit/debit target:")
     for gl in sorted(gl_tally, key=lambda k: -gl_tally[k]):
-        print(f"  {gl} -> lId {_lid(gl)}: {gl_tally[gl]}")
+        print(f"  {gl} -> lId {lid(gl)}: {gl_tally[gl]}")
 
     # Retry mode: keep only the entries that FAILED in a prior run, identified by
     # their 1-based position in the bridge results (order is deterministic given
@@ -135,18 +126,15 @@ def main() -> int:
         print(f"\n[retry] re-posting ONLY the {len(entries)} previously-failed "
               f"entries (positions {failed_idx[0]}..{failed_idx[-1]})")
 
-    # sanity: every entry balances by construction
-    unbalanced = [e for e in entries
-                  if abs(sum(l["debit"] for l in e["lines"])
-                         - sum(l["credit"] for l in e["lines"])) > 1e-6]
+    unbalanced = [e for e in entries if not e.is_balanced()]
     print(f"\nbalanced: {len(entries) - len(unbalanced)}/{len(entries)}")
 
     if not args.commit:
         print("\n[dry-run] no Sage write. Sample entries:")
         for e in entries[:3] + entries[-2:]:
-            l0, l1 = e["lines"]
-            print(f"  {e['date']}  Dr {l0['account_id']} {l0['debit']:.2f} | "
-                  f"Cr {l1['account_id']} {l1['credit']:.2f}  {e['comment']}")
+            l0, l1 = e.lines
+            print(f"  {e.entry_date}  Dr {lid(l0.gl_ref)} {l0.debit:.2f} | "
+                  f"Cr {lid(l1.gl_ref)} {l1.credit:.2f}  {e.comment[:39]}")
         print("\nRe-run with --commit (and Sage 50 CLOSED) to post.")
         return 0
 
@@ -154,71 +142,40 @@ def main() -> int:
         print("ERROR: --sai is required for --commit")
         return 1
 
-    # ── Pre-post backup: copy the .SAI file + companion .SAJ folder ─────────
-    # One bad batch into a live company file has no undo; this is the undo.
-    if not args.no_backup:
-        import shutil
-        from datetime import datetime
-        sai_path = Path(args.sai)
-        saj_path = sai_path.with_suffix(".SAJ")
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        bdir = sai_path.parent / "vtx_backup" / f"{sai_path.stem}_{stamp}"
-        bdir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(sai_path, bdir / sai_path.name)
-        if saj_path.is_dir():
-            shutil.copytree(saj_path, bdir / saj_path.name)
-        print(f"[backup] {sai_path.name}"
-              + (f" + {saj_path.name}/" if saj_path.is_dir() else "")
-              + f" -> {bdir}")
+    conn = Sage50Connector(args.sai, user=args.user)
+    conn.validate()
 
-    # ── Sage-side duplicate check (same key as JournalEntryAgent) ───────────
-    # Key: (entry_date_iso, description_39chars, abs_amount_2dp). Reads existing
-    # BNK lines from the GL over the batch's date range and skips matches, so
-    # re-running this script can never double-post.
+    if not args.no_backup:
+        print(f"[backup] -> {conn.backup()}")
+
     if not args.no_dedupe:
-        from datetime import date as _date
-        from sage50.bridge_reader import fetch_gl_transactions
-        d_lo = min(_date.fromisoformat(e["date"]) for e in entries)
-        d_hi = max(_date.fromisoformat(e["date"]) for e in entries)
+        d_lo = min(e.entry_date for e in entries)
+        d_hi = max(e.entry_date for e in entries)
         try:
-            existing_rows = fetch_gl_transactions(
-                start_date=d_lo, end_date=d_hi,
-                sai_file=args.sai, user=args.user,
-            )
+            existing = conn.existing_keys(d_lo, d_hi)
         except Exception as exc:
             print(f"ERROR: Sage duplicate check failed ({exc}).\n"
                   f"Refusing to post blind — re-run with --no-dedupe to override.")
             return 1
-        existing_keys = {
-            (r.transaction_date.isoformat(), r.description[:39],
-             f"{max(r.debit, r.credit):.2f}")
-            for r in existing_rows
-            if r.source.upper() == "BNK" and r.transaction_date is not None
-        }
-        kept, skipped = [], 0
-        for e in entries:
-            key = (e["date"], e["comment"], f"{e['lines'][0]['debit']:.2f}")
-            if key in existing_keys:
-                skipped += 1
-                print(f"  [dedupe] SKIP already in Sage: {e['date']}  {e['comment']}")
-            else:
-                kept.append(e)
+        before = len(entries)
+        entries = [e for e in entries if conn.key(e) not in existing]
+        skipped = before - len(entries)
         if skipped:
-            print(f"[dedupe] skipped {skipped} entr{'y' if skipped == 1 else 'ies'} "
-                  f"already posted; {len(kept)} remain")
-        entries = kept
+            for_msg = "entry" if skipped == 1 else "entries"
+            print(f"[dedupe] skipped {skipped} {for_msg} already posted; "
+                  f"{len(entries)} remain")
         if not entries:
             print("[dedupe] nothing left to post — all entries already in Sage.")
             return 0
 
     print(f"\n[commit] posting {len(entries)} entries to {args.sai} ...")
-    from sage50.bridge_reader import post_journal_entries
-    res = post_journal_entries(entries, sai_file=args.sai, user=args.user)
-    print(f"posted={res.get('posted')} total={res.get('total')} errors={res.get('errors')}")
-    fails = [r for r in res.get("results", []) if not r.get("posted")]
-    for f in fails[:15]:
-        print(f"  FAIL {f.get('date')} {f.get('comment','')[:30]} : {f.get('error','')[:60]}")
-    return 0 if res.get("errors", 0) == 0 else 1
+    res = conn.post(entries)
+    print(f"posted={res.posted} total={len(entries)} errors={res.errors}")
+    for i, r in enumerate(res.results):
+        if not r["posted"]:
+            e = entries[i]
+            print(f"  FAIL {e.entry_date} {e.comment[:30]} : {(r['error'] or '')[:60]}")
+    return 0 if res.ok else 1
 
 
 if __name__ == "__main__":
