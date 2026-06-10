@@ -68,6 +68,13 @@ class ClientConfig:
     bank: str = ""
     sender_email: str = ""
     year_end_month: int = 0  # 1–12 (e.g. 4 = April 30 year-end); 0 = not set
+    sai_folder: str = ""     # Sage company folder under R:\ (may differ from r_folder,
+                             # e.g. Theotherapy -> "Canadian Federation of theotherapy")
+
+    def sai_path(self, year: int) -> Path:
+        """Path to the Sage company file for a fiscal year: R:\\<sai_folder>\\<year>.SAI."""
+        folder = self.sai_folder or self.r_folder
+        return Path("R:/") / folder / f"{year}.SAI"
 
     @property
     def account_masked(self) -> str:
@@ -113,6 +120,7 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
                 bank=(row.get("bank") or "").strip(),
                 sender_email=(row.get("sender_email") or "").strip(),
                 year_end_month=year_end_month,
+                sai_folder=(row.get("sai_folder") or "").strip(),
             )
     return registry
 

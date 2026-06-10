@@ -250,7 +250,9 @@ def live_approvals(
     _user: dict = Depends(require_user),
 ) -> list[dict[str, Any]]:
     from core.approval_queue import get_pending
-    items = get_pending(limit=limit, account_no=account_no, period=period)
+    # account_no may be comma-separated for multi-account companies (e.g. Theotherapy BMO + RBC)
+    accts = [a.strip() for a in account_no.split(",") if a.strip()] if account_no else None
+    items = get_pending(limit=limit, account_nos=accts, period=period)
     return [it.model_dump(mode="json") for it in items]
 
 
@@ -327,6 +329,48 @@ def ops_run_watcher(
         return {"ok": False, "lines": ["ERROR: Watcher timed out after 300s"], "code": -1}
     except Exception as exc:
         return {"ok": False, "lines": [f"ERROR: {exc}"], "code": -1}
+
+
+@app.post("/api/ops/queue-post")
+def ops_queue_post(
+    account_no: str,
+    period: str = "",
+    client_id: str = "",
+    user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Queue a Sage 50 posting job for the local posting agent.
+
+    Cloud Run cannot reach Sage 50 (Windows-only bridge + R:\\ company files), so
+    the dashboard writes a QUEUED request to BQ; scripts/posting_agent.py --watch
+    running on the bookkeeping machine claims and executes it.
+    """
+    from core.post_queue import enqueue
+    from models.posting import PostRequest
+    req = PostRequest(
+        requested_by=reviewer_email(user),
+        client_id=client_id,
+        account_no=account_no,
+        period=period,
+    )
+    enqueue(req)
+    return {
+        "ok": True,
+        "request_id": req.request_id,
+        "account_no": account_no,
+        "period": period,
+        "note": "Queued. The local posting agent will post when Sage 50 is closed.",
+    }
+
+
+@app.get("/api/ops/post-requests")
+def ops_post_requests(
+    account_no: str | None = None,
+    limit: int = 20,
+    _user: dict = Depends(require_user),
+) -> list[dict[str, Any]]:
+    """Recent posting jobs (any status) — drives the Sage 50 post-history view."""
+    from core.post_queue import list_recent
+    return list_recent(limit=limit, account_no=account_no)
 
 
 @app.post("/api/ops/post-entries")
@@ -517,21 +561,27 @@ def ops_onboard_client(
     except Exception:
         pass
 
-    registry_path = pathlib.Path(r"R:\bookkeeping\client_accounts.csv")
-    if not registry_path.parent.exists():
-        row_csv = f"{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email},{year_end_month}"
+    # Use the env-var registry path (works in Cloud Run); fall back to R: drive if set.
+    import os as _os
+    registry_path = pathlib.Path(
+        _os.environ.get("VTX_CLIENT_REGISTRY", r"R:\bookkeeping\client_accounts.csv")
+    )
+    try:
+        existing = registry_path.read_text(encoding="utf-8") if registry_path.exists() else "account_no,r_folder,client_id,gl_bank_account,bank,sender_email\n"
+        if f",{client_id}," in existing:
+            raise HTTPException(status_code=409, detail=f"client_id '{client_id}' already exists in registry")
+        row = f"\n{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email}"
+        with open(registry_path, "a", encoding="utf-8") as fh:
+            fh.write(row)
+        return {"ok": True, "client_id": client_id, "message": f"Client '{company_name}' added to registry"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        row_csv = f"{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email}"
         return {
             "ok": True,
             "manual_registry": True,
             "client_id": client_id,
-            "message": f"Client '{company_name}' saved to dashboard metadata. Add to R:\\bookkeeping\\client_accounts.csv to enable statement routing.",
+            "message": f"Client '{company_name}' saved to dashboard metadata. Registry write failed: {exc}",
             "row": row_csv,
-            "hint": f"Add this line to R:\\bookkeeping\\client_accounts.csv: {row_csv}",
         }
-    existing = registry_path.read_text(encoding="utf-8") if registry_path.exists() else ""
-    if f",{client_id}," in existing:
-        raise HTTPException(status_code=409, detail=f"client_id '{client_id}' already exists in registry")
-    row = f"\n{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email},{year_end_month}"
-    with open(registry_path, "a", encoding="utf-8") as fh:
-        fh.write(row)
-    return {"ok": True, "client_id": client_id, "message": f"Client '{company_name}' added to registry"}

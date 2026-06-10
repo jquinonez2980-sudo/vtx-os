@@ -790,12 +790,11 @@
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
             <div style="display:flex;gap:8px;align-items:center">
-              <input class="input" type="text" id="sage-account-no" placeholder="Account e.g. xxxx5443" style="width:160px;font-size:12px;font-family:'JetBrains Mono',monospace">
-              <input class="input" type="text" id="sage-gl-bank" placeholder="GL e.g. 1060" style="width:100px;font-size:12px;font-family:'JetBrains Mono',monospace">
+              <input class="input" type="text" id="sage-account-no" placeholder="Account (blank = selected client)" style="width:200px;font-size:12px;font-family:'JetBrains Mono',monospace">
             </div>
             <button class="btn btn-primary" onclick="postToSage()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              Preview Posting (Dry Run)
+              Post to Sage 50
             </button>
             <span style="font:400 11px/1 'Inter',sans-serif;color:var(--t3)"><span id="sage-unposted-count">—</span> approved entries</span>
           </div>
@@ -829,10 +828,13 @@
     </div>
 
     <div class="card">
-      <div class="card-head"><div class="ch-title">Recent Post History</div></div>
+      <div class="card-head">
+        <div><div class="ch-title">Posting Jobs</div><div class="ch-sub">Queued from this dashboard · executed by the local Posting Agent</div></div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPostRequests()">↻ Refresh</button>
+      </div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Posted</th><th>Client</th><th>Period</th><th>Entries</th><th>Total Debit</th><th>Status</th><th>By</th></tr></thead>
+          <thead><tr><th>Job</th><th>Requested</th><th>Account</th><th>Period</th><th>Status</th><th>Result</th><th>Note</th></tr></thead>
           <tbody id="sage-history"></tbody>
         </table>
       </div>
@@ -1415,8 +1417,7 @@ async function fetchLiveForAccount(accountNo, period) {
     const el2 = document.getElementById('watcher-full-table');
     if (el1) el1.innerHTML = emptyWatcherPreview;
     if (el2) el2.innerHTML = emptyWatcherFull;
-    const sageHist = document.getElementById('sage-history');
-    if (sageHist) sageHist.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No post history — use local _post_je.py to post to Sage 50</td></tr>';
+    loadPostRequests();   // real posting-job history from BQ post_requests
 
   } catch (err) {
     setAgentStatus('book', 'error', 'Error');
@@ -1619,7 +1620,7 @@ function switchView(id) {
   const titles = { dashboard:'Dashboard', watcher:'Gmail Watcher', entries:'Review Entries', hst:'HST Tracker', sage:'Sage 50 Posting', clients:'Clients', reports:'Reports', settings:'Settings' };
   document.getElementById('page-title').textContent = titles[id] || id;
   if (id === 'settings') updateModeBanner();
-  if (id === 'sage') loadUnposted();
+  if (id === 'sage') { loadUnposted(); if (getToken()) loadPostRequests(); }
   if (id === 'clients') renderClientsList();
   if (id === 'hst' && getToken()) fetchLiveHST(currentPeriod);
   if (id === 'reports') renderReports();
@@ -1636,13 +1637,21 @@ function switchView(id) {
 }
 
 // ════════════════════════════════════════ CLIENT SELECTOR
+// Returns "Company · Bank" when two clients share the same company name, otherwise "Company".
+// Makes accounts like Theotherapy BMO vs Theotherapy RBC distinguishable everywhere.
+function clientLabel(c) {
+  const hasDupe = CLIENTS.filter(x => x.name === c.name).length > 1;
+  return hasDupe && c.bank && c.bank !== '—' ? c.name + ' · ' + c.bank : c.name;
+}
+
 function buildClientDropdown() {
   const list = document.getElementById('client-list');
   list.innerHTML = '';
   CLIENTS.forEach(c => {
     const d = document.createElement('div');
     d.className = 'dd-item' + (c.id === currentClient.id ? ' active' : '');
-    d.innerHTML = '<span class="di-dot" style="background:' + c.color + '"></span><div style="flex:1;min-width:0"><div class="di-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(c.name) + '</div><div class="di-industry">' + escHtml(c.industry || c.bank || '—') + (c.account_masked ? ' · <span style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + escHtml(c.account_masked) + '</span>' : '') + '</div></div>';
+    const label = clientLabel(c);
+    d.innerHTML = '<span class="di-dot" style="background:' + c.color + '"></span><div style="flex:1;min-width:0"><div class="di-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(label) + '</div><div class="di-industry">' + escHtml(c.industry || c.bank || '—') + (c.account_masked ? ' · <span style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + escHtml(c.account_masked) + '</span>' : '') + '</div></div>';
     d.onclick = () => setClient(c);
     list.appendChild(d);
   });
@@ -1651,7 +1660,7 @@ function buildClientDropdown() {
     if (!sel) return;
     const curVal = sel.value;
     while (sel.options.length > 1) sel.remove(1);
-    CLIENTS.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o); });
+    CLIENTS.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = clientLabel(c); sel.appendChild(o); });
     sel.value = curVal;
   });
 }
@@ -1702,10 +1711,10 @@ function filterClients(q) {
 function setClient(c) {
   currentClient = c;
   document.getElementById('client-dropdown').classList.remove('open');
-  document.getElementById('cs-name').textContent = c.name;
+  document.getElementById('cs-name').textContent = clientLabel(c);
   document.getElementById('cq-logo').textContent = c.abbr;
   document.getElementById('cq-logo').style.background = 'linear-gradient(135deg, ' + c.color + ' 0%, #1B355A 100%)';
-  document.getElementById('cq-name').textContent = c.name;
+  document.getElementById('cq-name').textContent = clientLabel(c);
   document.getElementById('cq-meta').textContent = c.industry + ' · ' + c.acct + (c.since && c.since !== '—' ? ' · Active since ' + c.since : '');
   document.getElementById('cq-unrec').textContent = c.unrec;
   document.getElementById('cq-hst').textContent = '$' + c.hst.toLocaleString();
@@ -2401,10 +2410,11 @@ function renderHSTByClient() {
 function renderSageHistory() {
   const tbody = document.getElementById('sage-history');
   if (!tbody) return;
-  tbody.innerHTML = SAGE_HISTORY.map(h =>
-    '<tr><td><span class="mono">' + h.posted + '</span></td><td>' + h.client + '</td><td>' + h.period + '</td>' +
-    '<td style="font-weight:600">' + h.entries + '</td><td style="font-weight:600">' + h.total + '</td>' +
-    '<td><span class="badge badge-green badge-dot">Posted</span></td>' +
+  tbody.innerHTML = SAGE_HISTORY.map((h, i) =>
+    '<tr><td><span class="mono">demo-' + (i + 1) + '</span></td><td>' + h.posted + '</td>' +
+    '<td>' + h.client + '</td><td style="font-weight:600">' + h.period + '</td>' +
+    '<td><span class="badge badge-green badge-dot">DONE</span></td>' +
+    '<td style="font-weight:600">' + h.entries + ' posted · 0 skipped · 0 err</td>' +
     '<td style="color:var(--t3)">' + h.by + '</td></tr>'
   ).join('');
 }
@@ -2415,34 +2425,55 @@ async function postToSage() {
     setTimeout(() => showToast('✓ 31 entries posted to Sage 50 (demo mode)', 'success'), 3200);
     return;
   }
-  const accountNo = (document.getElementById('sage-account-no')?.value || '').trim();
-  const glBank    = (document.getElementById('sage-gl-bank')?.value || '').trim();
-  if (!accountNo || !glBank) {
-    showToast('Enter the account number (e.g. xxxx5443) and GL bank code (e.g. 1060) above', 'warning');
+  const accountNo = (document.getElementById('sage-account-no')?.value || '').trim()
+                 || (currentClient && (currentClient.account_masked || currentClient.acct)) || '';
+  if (!accountNo) {
+    showToast('Enter the account number (e.g. xxxx5443) or select a client first', 'warning');
     return;
   }
-  showToast('Running dry-run posting preview…', 'info');
+  const period = currentPeriod || '';
+  if (!confirm('Queue Sage 50 posting for ' + accountNo + (period ? ' · ' + period : ' · all periods')
+             + '?\n\nThe local Posting Agent will post all APPROVED entries when Sage 50 is closed. '
+             + 'Rejected and still-pending entries are never posted.')) return;
   try {
-    const qs = new URLSearchParams({ account_no: accountNo, gl_bank: glBank });
-    const result = await apiFetch('/api/ops/post-entries?' + qs.toString(), { method: 'POST' });
-    const previewDiv = document.getElementById('post-preview-log');
-    const previewLog = document.getElementById('post-preview-lines');
-    if (previewDiv && previewLog) {
-      previewDiv.classList.add('visible');
-      previewLog.innerHTML = (result.lines || []).map(l => {
-        const cls = l.startsWith('BQ') || /entries|built|posted|balanced/i.test(l) ? 'ok'
-                  : l.startsWith('ERROR') || /error|fail/i.test(l) ? 'warn' : 'info';
-        return '<div class="log-line"><span class="' + cls + '">' + escHtml(l) + '</span></div>';
-      }).join('');
-    }
+    const qs = new URLSearchParams({ account_no: accountNo, period: period });
+    const result = await apiFetch('/api/ops/queue-post?' + qs.toString(), { method: 'POST' });
     if (result.ok) {
-      showToast('Dry run complete — to post for real, run: python scripts/_post_je.py --account ' + accountNo + ' --gl-bank ' + glBank + ' --sai <path> --commit', 'success');
+      showToast('✓ Posting job queued (' + result.request_id.slice(0, 8) + ') — the local agent will pick it up', 'success');
+      loadPostRequests();
     } else {
-      showToast('Dry run returned errors — check the preview log above', 'warning');
+      showToast('Queue failed: ' + (result.note || 'unknown error'), 'warning');
     }
   } catch (err) {
-    showToast('Post preview failed: ' + err.message, 'warning');
+    showToast('Queue post failed: ' + err.message, 'warning');
   }
+}
+
+async function loadPostRequests() {
+  if (!getToken()) return;
+  try {
+    const c = currentClient || {};
+    const acctParam = (c.account_masked || c.acct)
+      ? '?account_no=' + encodeURIComponent(c.account_masked || c.acct) : '';
+    const data = await apiFetch('/api/ops/post-requests' + acctParam);
+    const tbody = document.getElementById('sage-history');
+    if (!tbody || !Array.isArray(data)) return;
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">No posting jobs yet — approve entries, then click Post to Sage</td></tr>';
+      return;
+    }
+    const badge = s => s === 'DONE' ? 'badge-green' : s === 'FAILED' ? 'badge-red'
+                     : s === 'RUNNING' ? 'badge-gold' : 'badge-gray';
+    tbody.innerHTML = data.map(r =>
+      '<tr><td><span class="mono">' + escHtml((r.request_id || '').slice(0, 8)) + '</span></td>'
+      + '<td>' + escHtml((r.requested_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
+      + '<td><span class="mono">' + escHtml(r.account_no || '') + '</span></td>'
+      + '<td style="font-weight:600">' + escHtml(r.period || 'all') + '</td>'
+      + '<td><span class="badge ' + badge(r.status) + ' badge-dot">' + escHtml(r.status || '') + '</span></td>'
+      + '<td style="font-weight:600">' + (r.posted || 0) + ' posted · ' + (r.skipped || 0) + ' skipped · ' + (r.errors || 0) + ' err</td>'
+      + '<td style="color:var(--t3);font-size:11px">' + escHtml(r.result_note || r.requested_by || '') + '</td></tr>'
+    ).join('');
+  } catch (_) {}
 }
 
 // ════════════════════════════════════════ CLIENTS LIST
@@ -2651,8 +2682,19 @@ function testConnection() {
 }
 
 // ════════════════════════════════════════ ONBOARDING
-function openOnboarding()  { document.getElementById('modal-onboarding').classList.add('open'); }
-function closeOnboarding() { document.getElementById('modal-onboarding').classList.remove('open'); }
+function openOnboarding() {
+  if (!getToken()) {
+    showToast('Sign in with your access key to onboard clients', 'warning');
+    return;
+  }
+  document.getElementById('modal-onboarding').classList.add('open');
+}
+function closeOnboarding() {
+  document.getElementById('modal-onboarding').classList.remove('open');
+  // Clear all form fields so data never persists between sessions
+  const form = document.getElementById('onboarding-form');
+  if (form) form.reset();
+}
 
 function connectGoogleAccount() {
   if (!getToken()) {
@@ -2676,38 +2718,31 @@ async function submitOnboarding(e) {
 
   const clientId = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '').slice(0, 30);
 
-  if (getToken()) {
-    try {
-      const qs = new URLSearchParams({
-        company_name: companyName,
-        client_id:    clientId,
-        account_no:   accountNo || '000000',
-        bank,
-        gl_bank_account: glBankAcct || '1060',
-        sender_email: senderEmail,
-        year_end_month: String(yearEndMonth),
-      });
-      const result = await apiFetch('/api/ops/onboard-client?' + qs.toString(), { method: 'POST' });
-      closeOnboarding();
-      if (result.ok) {
-        showToast('Client "' + companyName + '" onboarded successfully', 'success');
-        if (result.manual_registry) {
-          setTimeout(() => showToast('Also add to client_accounts.csv to enable statement routing', 'info'), 1400);
-        } else {
-          setTimeout(() => showToast('Run Gmail Watcher to activate statement detection', 'info'), 1400);
-        }
-        fetchLiveForAccount(null, null);
-      } else {
-        showToast(result.error || 'Onboarding error', 'warning');
-      }
-    } catch (err) {
-      closeOnboarding();
-      showToast('Server error: ' + err.message, 'warning');
-    }
-  } else {
+  if (!getToken()) {
+    showToast('Sign in with your access key to onboard clients', 'warning');
+    return;
+  }
+  try {
+    const qs = new URLSearchParams({
+      company_name: companyName,
+      client_id:    clientId,
+      account_no:   accountNo || '000000',
+      bank,
+      gl_bank_account: glBankAcct || '1060',
+      sender_email: senderEmail,
+      year_end_month: String(yearEndMonth),
+    });
+    const result = await apiFetch('/api/ops/onboard-client?' + qs.toString(), { method: 'POST' });
     closeOnboarding();
-    showToast('Client "' + companyName + '" created (demo mode)', 'success');
-    setTimeout(() => showToast('Connect live data to persist to registry', 'info'), 1200);
+    if (result.ok) {
+      showToast('Client "' + companyName + '" onboarded — run Gmail Watcher to activate', 'success');
+      fetchLiveForAccount(null, null);
+    } else {
+      showToast(result.error || 'Onboarding error', 'warning');
+    }
+  } catch (err) {
+    closeOnboarding();
+    showToast('Onboarding failed: ' + err.message, 'warning');
   }
 }
 

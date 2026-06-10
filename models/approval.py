@@ -20,6 +20,7 @@ class ApprovalStatus(str, Enum):
     APPROVED  = "APPROVED"
     REJECTED  = "REJECTED"
     ESCALATED = "ESCALATED"
+    POSTED    = "POSTED"     # set by the local posting agent after Sage 50 accepts the entry
 
 
 class ApprovalItem(BaseModel):
