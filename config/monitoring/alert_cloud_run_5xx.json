@@ -1,0 +1,28 @@
+{
+  "displayName": "AcumenAI API — 5xx error rate",
+  "documentation": {
+    "content": "Cloud Run service acumenai-api is returning server errors. Check: gcloud run services logs read acumenai-api --region=northamerica-northeast2 --limit=50",
+    "mimeType": "text/markdown"
+  },
+  "conditions": [
+    {
+      "displayName": "5xx responses > 5 in 5 min",
+      "conditionThreshold": {
+        "filter": "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"acumenai-api\" AND metric.type = \"run.googleapis.com/request_count\" AND metric.labels.response_code_class = \"5xx\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 5,
+        "duration": "0s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "enabled": true
+}

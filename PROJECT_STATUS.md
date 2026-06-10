@@ -1,9 +1,12 @@
 # PROJECT_STATUS.md — Vertex AI Accounting OS
-# Updated: 2026-06-05  |  Session: 18  (AcumenAI dashboard — Phase A showcase artifact)
+# Updated: 2026-06-10  |  Session: 21  (posting pipeline + GL-fix tooling + repo audit)
 # Trace: vtx-os-proj-001
 
 ## CURRENT PHASE
-Phase 2 — Multi-Agent ADK Architecture (IN PROGRESS)
+Phase 2 — Multi-Agent ADK Architecture [COMPLETE]
+Post-Phase-2 operational hardening (sessions 19–21): dashboard-driven posting,
+GL-incident remediation, security fixes from full repo audit.
+NEXT MAJOR: QuickBooks Online connector (Sage 50 is being sunset — see Session 21).
 
 ## COMPLETED STEPS
 
@@ -881,9 +884,56 @@ distinct signature accent: amber/gold** (`gold-500 #D9A21B`, `-600 #B7791F`, `-5
   GL-derived rule candidates identified (fuel stations → 5730; incoming INTERAC e-transfers/
   deposits → revenue 4020 — pending policy confirmation before editing the shared ruleset).
 
+## SESSION 20 CHANGES  [2026-06-08/09]
+- **Theotherapy Sage 50 posting (xxxx4733):** 418 entries from BQ via `scripts/_post_je.py`
+  → 395 posted OK (journal 683–1077), 23 FAILED (Jan-2026 dates rejected by 2025.SAI fiscal
+  year). ⚠ INCIDENT: posted with `--gl-bank 1060` but this account is GL **1065** — root
+  cause: repo `config/client_accounts.csv` said 1060 while `R:\bookkeeping\client_accounts.csv`
+  said 1065 (registry drift) + free-text CLI arg. Remediation tooling built (see below).
+- **`--from-date` added to `_post_je.py`** for fiscal-year-safe re-posting.
+- **Gmail watcher GCS 403 fixed:** `roles/storage.objectAdmin` granted on exports bucket.
+- **Dashboard fixes:** account disambiguation (`clientLabel` adds bank when names collide);
+  onboarding demo-mode block + form reset + `VTX_CLIENT_REGISTRY` env var for container path;
+  28 Jan-2026 approval rows moved xxxx4733→xxxx1555 (streaming-buffer delayed).
+
+## SESSION 21 CHANGES  [2026-06-09/10]
+- **Full repo + GCP audit** (11 dimensions). Highlights: build context verified clean
+  (.gcloudignore already excluded client data — earlier CRITICAL finding retracted);
+  no hardcoded secrets; auth solid. Grade C+ — gaps are CI, posting duplication, SPA monolith.
+- **5 audit fixes:** `.dockerignore` (defense-in-depth); `DASHBOARD_API_KEY` moved to Secret
+  Manager (`acumen-dashboard-key`, deploy via `--set-secrets` — revision 00030); `.SAI/.SAJ`
+  pre-post backup + Sage-side dedupe added to `_post_je.py` (`--no-backup`/`--no-dedupe`
+  escape hatches); requirements pinned exactly + `requirements.lock`; alert policy configs
+  (`config/monitoring/`, `scripts/setup_alerts.ps1` — ⚠ NOT YET RUN).
+- **GL 1060→1065 correction tool:** `scripts/_fix_gl_bank.py` — Phase 1 posts 395 reversals
+  (`REV:` tagged), Phase 2 re-posts with correct GL; aborts Phase 2 on any Phase-1 failure.
+  ⚠ NOT YET RUN (dry-run pending). Repo registry fixed to 1065.
+- **Dashboard-driven posting pipeline (review → post for all clients):**
+  `models/posting.py` (PostRequest QUEUED→RUNNING→DONE/FAILED), `core/post_queue.py`
+  (DML-only — streaming-buffer safe), `POST /api/ops/queue-post` + `GET /api/ops/post-requests`,
+  "Post to Sage 50" button + Posting Jobs table in SPA, `scripts/posting_agent.py --watch`
+  (local agent: approval-aware — posts auto-approved + reviewer-APPROVED w/ final_gl_no,
+  never REJECTED/PENDING; per-year SAI routing; backup+dedupe; flips queue rows to POSTED).
+  `ApprovalStatus.POSTED` added. Registry: `sai_folder` column + `ClientConfig.sai_path(year)`.
+  DEPLOYED to Cloud Run (rev 00030). ⚠ Local agent not yet started; GL fix must run first.
+- **Strategic decision: QuickBooks Online ASAP** ("Sage is dying"). Plan: extract platform-
+  neutral `LedgerConnector` from the 4 duplicated posting paths; QBO posts directly from
+  Cloud Run (no local agent needed for QBO clients). Register Intuit developer app early
+  (approval lead time). Solo-operator mode confirmed → multi-user work deferred.
+
 ## NEXT STEPS
-Year-end worksheet generated; investor materials complete; dashboard live (API+Clerk); theotherapy
-2nd account onboarded; all offline tests green. Next priorities:
+Next priorities (ordered — from Session 21 audit):
+  1. ⚠ Add `sai_folder` column to `R:\bookkeeping\client_accounts.csv` (the LIVE registry —
+     repo copy already has it): theotherapy rows → `Canadian Federation of theotherapy`
+  2. Run `scripts/_fix_gl_bank.py` dry-run (expect 395+395) then `--commit` (Sage CLOSED)
+  3. Run `scripts/setup_alerts.ps1` (one command, configs ready)
+  4. Start `scripts/posting_agent.py --watch`; first dashboard-driven post
+  5. CI pipeline (`.github/workflows/ci.yml` + ruff) — gate before LedgerConnector work
+  6. `LedgerConnector` extraction (QBO seam) + registry `platform` column
+  7. Rotate DASHBOARD_API_KEY value (burned in old revisions/transcripts)
+  8. Sage 50: Start New Year → 2026.SAI for theotherapy (unblocks 23 Jan-2026 entries)
+
+Older context (pre-Session-20):
 
 ### Immediate accounting tasks (Concetta 2026-04 year-end)
   1. Open `R:\Concetta Enterprises Inc\Year End\concetta_yearend_2026-04.xlsx`
