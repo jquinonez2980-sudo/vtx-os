@@ -72,6 +72,8 @@ class ClientConfig:
                              # e.g. Theotherapy -> "Canadian Federation of theotherapy")
     platform: str = "sage50" # accounting platform: "sage50" | "qbo" (selects the
                              # LedgerConnector; see ledger/__init__.py)
+    platform_ref: str = ""   # platform-specific company id — QBO realm id
+                             # (printed by scripts/qbo_auth.py); empty for sage50
 
     def sai_path(self, year: int) -> Path:
         """Path to the Sage company file for a fiscal year: R:\\<sai_folder>\\<year>.SAI."""
@@ -140,6 +142,7 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
                 year_end_month=year_end_month,
                 sai_folder=(row.get("sai_folder") or "").strip(),
                 platform=(row.get("platform") or "sage50").strip().lower(),
+                platform_ref=(row.get("platform_ref") or "").strip(),
             )
     return registry
 

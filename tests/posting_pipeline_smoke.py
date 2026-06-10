@@ -113,12 +113,13 @@ from core.client_registry import ClientConfig, load_registry
 cfg = ClientConfig(account_no="36328934733", r_folder="Theotherapy",
                    client_id="theotherapy", gl_bank_account="1065",
                    sai_folder="Canadian Federation of theotherapy")
+# compare .parts, not str() — separators differ between Windows and CI's Linux
 check("sai_path uses sai_folder + year",
-      str(cfg.sai_path(2025)) == r"R:\Canadian Federation of theotherapy\2025.SAI")
+      cfg.sai_path(2025).parts[-2:] == ("Canadian Federation of theotherapy", "2025.SAI"))
 cfg2 = ClientConfig(account_no="18905315443", r_folder="Concetta Enterprises Inc",
                     client_id="concetta", gl_bank_account="1060")
 check("sai_path falls back to r_folder when sai_folder empty",
-      str(cfg2.sai_path(2026)) == r"R:\Concetta Enterprises Inc\2026.SAI")
+      cfg2.sai_path(2026).parts[-2:] == ("Concetta Enterprises Inc", "2026.SAI"))
 check("account_masked", cfg.account_masked == "xxxx4733")
 
 with tempfile.TemporaryDirectory() as td:
@@ -182,15 +183,58 @@ check("connector gets the year's SAI path", str(c_sage.sai).endswith("2026.SAI")
 
 try:
     connector_for(replace(cfg, platform="qbo"), 2026)
-    check("qbo -> clear NotImplementedError", False)
-except NotImplementedError as exc:
-    check("qbo -> clear NotImplementedError", "Intuit" in str(exc))
+    check("qbo without realm id -> clear error", False)
+except ValueError as exc:
+    check("qbo without realm id -> clear error", "platform_ref" in str(exc))
+
+from ledger.qbo import QboConnector
+
+c_qbo = connector_for(replace(cfg, platform="qbo", platform_ref="9341453"), 2026)
+check("qbo platform -> QboConnector with realm", isinstance(c_qbo, QboConnector) and c_qbo.realm == "9341453")
 
 try:
     connector_for(replace(cfg, platform="xero"), 2026)
     check("unknown platform rejected", False)
 except ValueError:
     check("unknown platform rejected", True)
+
+# ── 7. QboConnector offline (no network — mocked query/account map) ─────────
+print("\n7. QboConnector wire format + keys (offline)")
+qc = QboConnector("9341453")
+qc._account_map = {"1065": "85", "4020": "91", "5800": "99"}   # mock AcctNum->Id
+
+k = qc.key(trunc)   # the 60-char-comment entry from section 2
+check("qbo key does NOT truncate the comment", k[1] == "X" * 60)
+check("qbo key amount 2dp", k[2] == "10.00")
+
+wire = qc._to_qbo(dep)
+check("qbo wire: TxnDate ISO", wire["TxnDate"] == "2026-01-05")
+check("qbo wire: PrivateNote carries comment", wire["PrivateNote"] == "CLIENT DEPOSIT")
+check("qbo wire: debit line", wire["Line"][0]["JournalEntryLineDetail"]["PostingType"] == "Debit"
+      and wire["Line"][0]["JournalEntryLineDetail"]["AccountRef"]["value"] == "85"
+      and wire["Line"][0]["Amount"] == 1000.0)
+check("qbo wire: credit line", wire["Line"][1]["JournalEntryLineDetail"]["PostingType"] == "Credit"
+      and wire["Line"][1]["JournalEntryLineDetail"]["AccountRef"]["value"] == "91")
+
+try:
+    qc._account_id("9999")
+    check("unmapped GL ref fails loudly", False)
+except RuntimeError as exc:
+    check("unmapped GL ref fails loudly", "AcctNum" in str(exc))
+
+# existing_keys parses QBO JournalEntry JSON (sum of debit lines = abs amount)
+qc._query = lambda q: [{                       # type: ignore[method-assign]
+    "Id": "1", "TxnDate": "2026-01-05", "PrivateNote": "CLIENT DEPOSIT",
+    "Line": [
+        {"Amount": 1000.0, "JournalEntryLineDetail": {"PostingType": "Debit"}},
+        {"Amount": 1000.0, "JournalEntryLineDetail": {"PostingType": "Credit"}},
+    ],
+}]
+keys = qc.existing_keys(date(2026, 1, 1), date(2026, 1, 31))
+check("qbo existing_keys parses JE JSON",
+      keys == {("2026-01-05", "CLIENT DEPOSIT", "1000.00")})
+check("qbo existing key matches connector key for same entry",
+      qc.key(dep) in keys)
 
 # ── result ──────────────────────────────────────────────────────────────────
 total = _passed + _failed

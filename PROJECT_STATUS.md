@@ -921,6 +921,25 @@ distinct signature accent: amber/gold** (`gold-500 #D9A21B`, `-600 #B7791F`, `-5
   Cloud Run (no local agent needed for QBO clients). Register Intuit developer app early
   (approval lead time). Solo-operator mode confirmed → multi-user work deferred.
 
+## SESSION 22 CHANGES  [2026-06-10]
+- **CI live on GitHub Actions** (compile + ruff + offline suite). First runs caught: a
+  3-week-old dashboard auth-test break, an --override-gl no-op bug, Linux path-separator
+  assumptions, and 6 smoke tests requiring gitignored client data (now SKIPPED on CI
+  with reasons; synthetic fixtures = future task).
+- **Posting consolidation complete (M1.1+M1.2):** `ledger/` package — neutral
+  build_bank_entries + LedgerConnector ABC; Sage50Connector owns lid/39-char keys
+  (`bnk_key` = THE dedupe contract)/backup/bridge wire. posting_agent, _post_je, and
+  JournalEntryAgent all migrated. Registry is GL source of truth: `--gl-bank` optional,
+  conflicts abort, `--override-gl` escape hatch. `resolve_client()` shared lookup.
+- **QboConnector (QuickBooks Online)** — `ledger/qbo.py`: OAuth2 refresh flow with
+  Intuit token-ROTATION persisted back to Secret Manager (`vtx-qbo-oauth`); AcctNum→Id
+  account map (fails loudly on unmapped refs); JournalEntry wire format; paginated
+  existing_keys; NO comment truncation in keys. `scripts/qbo_auth.py` = one-time consent
+  flow (localhost:8765 callback), prints realm id → registry `platform_ref` column.
+  QBO clients post directly from Cloud Run — no local agent needed.
+  Status: code complete, offline-tested; awaiting Intuit app creation (portal account ✓)
+  → sandbox end-to-end test.
+
 ## NEXT STEPS
 Next priorities (ordered — from Session 21 audit):
   1. ⚠ Add `sai_folder` column to `R:\bookkeeping\client_accounts.csv` (the LIVE registry —

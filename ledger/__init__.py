@@ -30,8 +30,6 @@ def connector_for(cfg, year: int, *, user: str = "sysadmin",
         from ledger.sage50 import Sage50Connector
         return Sage50Connector(cfg.sai_path(year), user=user, password=password)
     if platform == "qbo":
-        raise NotImplementedError(
-            "QboConnector is not implemented yet — register the Intuit developer "
-            "app and add ledger/qbo.py (the interface in ledger/base.py is the spec)."
-        )
+        from ledger.qbo import QboConnector
+        return QboConnector(realm_id=getattr(cfg, "platform_ref", ""))
     raise ValueError(f"Unknown ledger platform '{platform}' for client {cfg.client_id!r}")
