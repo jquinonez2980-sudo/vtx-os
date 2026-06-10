@@ -104,37 +104,24 @@ class JournalEntryAgent(AgentBase):
             )
 
         # Entry-level idempotency — skip individual drafts already posted to Sage 50.
-        # Key: (entry_date_iso, description_39chars, abs_amount_2dp)
-        # Each BNK journal entry writes two GL lines (debit + credit), both with the
-        # same abs amount and description, so max(debit, credit) produces the same key
-        # for either line — the set deduplicates them automatically.
-        # If the bridge is unavailable the check is skipped with a warning; entries are
-        # posted and the purge_duplicates.py script can clean up any duplicates afterward.
+        # Key definition + GL fetch live in ledger/sage50.py (bnk_key / connector) so
+        # every posting path dedupes identically. If the bridge is unavailable the
+        # check is skipped with a warning; entries are posted and purge_duplicates.py
+        # can clean up afterward.
         existing_keys: set[tuple[str, str, str]] = set()
         skipped_count = 0
         if period:
             try:
-                from sage50.bridge_reader import fetch_gl_transactions
+                from ledger.sage50 import Sage50Connector
                 year, month  = int(period[:4]), int(period[5:7])
                 period_start = date(year, month, 1)
                 period_end   = date(year, month, calendar.monthrange(year, month)[1])
-                existing_rows = fetch_gl_transactions(
-                    start_date=period_start,
-                    end_date=period_end,
-                    sai_file=payload.get("sai_file"),
+                conn = Sage50Connector(
+                    payload.get("sai_file"),
                     user=payload.get("sage50_user"),
                     password=payload.get("sage50_password"),
                 )
-                for r in existing_rows:
-                    if (r.source.upper() == "BNK"
-                            and r.transaction_date is not None
-                            and period_start <= r.transaction_date <= period_end):
-                        abs_amt = max(r.debit, r.credit)
-                        existing_keys.add((
-                            r.transaction_date.isoformat(),
-                            r.description[:39],
-                            f"{abs_amt:.2f}",
-                        ))
+                existing_keys = conn.existing_keys(period_start, period_end)
                 if existing_keys:
                     print(
                         f"[journal-entry-agent] {len(existing_keys)} existing BNK key(s) "
@@ -148,13 +135,11 @@ class JournalEntryAgent(AgentBase):
                     file=sys.stderr,
                 )
 
+        from ledger.sage50 import bnk_key
         filtered_drafts: list = []
         for draft in drafts:
-            key = (
-                draft.entry_date.isoformat(),
-                draft.description[:39],
-                f"{abs(draft.debit_line.debit):.2f}",
-            )
+            key = bnk_key(draft.entry_date, draft.description,
+                          abs(draft.debit_line.debit))
             if key in existing_keys:
                 print(
                     f"[journal-entry-agent] SKIPPED duplicate: "

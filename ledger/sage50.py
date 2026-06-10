@@ -26,45 +26,51 @@ def lid(display_code: str) -> str:
     return str(int(display_code) * 10000)
 
 
+def bnk_key(entry_date: date, comment: str, abs_amount) -> EntryKey:
+    """THE Sage 50 BNK dedupe key — single definition for every posting path.
+    Comment truncated to Sage's 39-char storage; amount as a 2dp string."""
+    return (entry_date.isoformat(), comment[:_COMMENT_MAX], f"{abs_amount:.2f}")
+
+
 class Sage50Connector(LedgerConnector):
     platform = "sage50"
 
-    def __init__(self, sai_path: Path | str, user: str = "sysadmin",
+    def __init__(self, sai_path: Path | str | None, user: str | None = None,
                  password: str | None = None):
-        self.sai = Path(sai_path)
+        # sai_path=None defers resolution to bridge_reader's credential chain
+        # (env VTX_SAGE50_SAI -> Secret Manager vtx-sage50-company-path).
+        self.sai = Path(sai_path) if sai_path else None
         self.user = user
         self.password = password
 
     # ── contract ─────────────────────────────────────────────────────────────
 
     def validate(self) -> None:
-        if not self.sai.exists():
+        if self.sai is not None and not self.sai.exists():
             raise FileNotFoundError(
                 f"{self.sai} does not exist. If this is a new fiscal year, create it "
                 f"in Sage 50 first: Maintenance -> Start New Year."
             )
 
     def key(self, entry: LedgerEntry) -> EntryKey:
-        return (
-            entry.entry_date.isoformat(),
-            entry.comment[:_COMMENT_MAX],
-            f"{entry.abs_amount:.2f}",
-        )
+        return bnk_key(entry.entry_date, entry.comment, entry.abs_amount)
 
     def existing_keys(self, start: date, end: date) -> set[EntryKey]:
         from sage50.bridge_reader import fetch_gl_transactions
         rows = fetch_gl_transactions(
             start_date=start, end_date=end,
-            sai_file=str(self.sai), user=self.user, password=self.password,
+            sai_file=str(self.sai) if self.sai else None,
+            user=self.user, password=self.password,
         )
         return {
-            (r.transaction_date.isoformat(), r.description[:_COMMENT_MAX],
-             f"{max(r.debit, r.credit):.2f}")
+            bnk_key(r.transaction_date, r.description, max(r.debit, r.credit))
             for r in rows
             if r.source.upper() == "BNK" and r.transaction_date is not None
         }
 
-    def backup(self) -> Path:
+    def backup(self) -> Path | None:
+        if self.sai is None:
+            return None
         saj = self.sai.with_suffix(".SAJ")
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         bdir = self.sai.parent / "vtx_backup" / f"{self.sai.stem}_{stamp}"
@@ -78,7 +84,8 @@ class Sage50Connector(LedgerConnector):
         from sage50.bridge_reader import post_journal_entries
         payload = [self._to_bridge(e) for e in entries]
         raw = post_journal_entries(
-            payload, sai_file=str(self.sai), user=self.user, password=self.password,
+            payload, sai_file=str(self.sai) if self.sai else None,
+            user=self.user, password=self.password,
         )
         results = [
             {"posted": bool(r.get("posted")),
