@@ -1,36 +1,38 @@
 # VTX-OS Python dependencies
+# Pinned to the exact versions in the known-good .venv (2026-06-09 audit).
+# To upgrade deliberately: bump a pin, run the offline smoke suite, commit.
 
-google-adk>=1.33.0
-google-cloud-aiplatform>=1.60.0
-google-cloud-bigquery>=3.20.0
-google-cloud-storage>=2.16.0
-google-cloud-documentai>=2.26.0
-google-cloud-secret-manager>=2.20.0
-google-auth>=2.29.0
-google-api-python-client>=2.127.0
-google-auth-httplib2>=0.2.0
-google-auth-oauthlib>=1.2.0
+google-adk==1.33.0
+google-cloud-aiplatform==1.150.0
+google-cloud-bigquery==3.41.0
+google-cloud-storage==3.10.1
+google-cloud-documentai==3.14.0
+google-cloud-secret-manager==2.28.0
+google-auth==2.51.0
+google-api-python-client==2.196.0
+google-auth-httplib2==0.4.0
+google-auth-oauthlib==1.4.0
 
 # Cloud Functions / Eventarc
-functions-framework>=3.5.0
+functions-framework==3.10.1
 
 # PDF extraction
-pymupdf>=1.23.0
-pdfplumber>=0.10.0
-pandas>=2.0.0
+pymupdf==1.27.2.3
+pdfplumber==0.11.9
+pandas==3.0.3
 
 # Utilities
-python-dotenv>=1.0.0
-pydantic>=2.7.0
-httpx>=0.27.0
-pyodbc>=5.0.0
-openpyxl>=3.1.0
+python-dotenv==1.2.2
+pydantic==2.13.4
+httpx==0.28.1
+pyodbc==5.3.0
+openpyxl==3.1.5
 
 # Dashboard API (Cloud Run JSON API — see dashboard/)
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-gunicorn>=22.0.0
-pyjwt[crypto]>=2.9.0
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+gunicorn==26.0.0
+pyjwt[crypto]==2.12.1
 
 # Dev / test
-pytest>=8.0.0
+pytest==9.0.3

@@ -1,0 +1,21 @@
+# Errors-only to start: real bugs (syntax, undefined names, unused imports),
+# zero style noise. Tighten select list once the codebase is green in CI.
+target-version = "py314"
+line-length = 110
+
+extend-exclude = [
+    ".venv",
+    "scripts/archive",
+    "sage50_bridge",
+    "data",
+]
+
+[lint]
+# E9  = syntax/io errors          F63 = invalid comparisons
+# F7  = keyword/return misuse     F82 = undefined names
+# F401 = unused imports           F841 = unused local variables
+select = ["E9", "F63", "F7", "F82", "F401", "F841"]
+
+[lint.per-file-ignores]
+# Test scripts import models/agents conditionally for mock injection.
+"tests/*" = ["F401"]

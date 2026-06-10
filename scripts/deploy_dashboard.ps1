@@ -17,7 +17,7 @@
 # characters (em-dash, smart quotes) in files saved without a BOM.
 
 param(
-    [string]$ApiKey     = "",     # DASHBOARD_API_KEY: required for /api/live/* access
+    [string]$ApiKey     = "",     # rotate DASHBOARD_API_KEY: adds a new Secret Manager version
     [string]$JwksUrl    = "",     # AUTH_JWKS_URL:     Clerk/Auth0 JWKS (overrides ApiKey)
     [string]$Issuer     = "",
     [string]$Audience   = "",
@@ -40,47 +40,63 @@ Write-Host ""
 # ---------------------------------------------------------------------------
 # 1. Enable APIs
 # ---------------------------------------------------------------------------
-Write-Host "1/4  Enabling APIs (run, cloudbuild, artifactregistry) ..." -ForegroundColor Yellow
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com --project=$PROJECT
+Write-Host "1/5  Enabling APIs (run, cloudbuild, artifactregistry, secretmanager) ..." -ForegroundColor Yellow
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com --project=$PROJECT
 
 # ---------------------------------------------------------------------------
 # 2. Service account
 # ---------------------------------------------------------------------------
-Write-Host "2/4  Creating service account $SA_NAME ..." -ForegroundColor Yellow
+Write-Host "2/5  Creating service account $SA_NAME ..." -ForegroundColor Yellow
 gcloud iam service-accounts create $SA_NAME --display-name="AcumenAI Dashboard API" --project=$PROJECT
 if (-not $?) { Write-Host "     (may already exist - continuing)" }
 
 # ---------------------------------------------------------------------------
 # 3. IAM bindings (minimum needed)
 # ---------------------------------------------------------------------------
-Write-Host "3/4  Granting IAM roles ..." -ForegroundColor Yellow
+Write-Host "3/5  Granting IAM roles ..." -ForegroundColor Yellow
 $ROLES = @(
     "roles/bigquery.jobUser",
-    "roles/bigquery.dataEditor"
+    "roles/bigquery.dataEditor",
+    "roles/secretmanager.secretAccessor"
 )
 foreach ($role in $ROLES) {
     Write-Host "     $role"
     gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:$SA_EMAIL" --role=$role --quiet | Out-Null
 }
+# GCS: watcher archives CSVs + PDFs to the exports bucket
+$GCS_BUCKET = "$PROJECT-vtx-exports"
+Write-Host "     roles/storage.objectAdmin on gs://$GCS_BUCKET"
+gcloud storage buckets add-iam-policy-binding "gs://$GCS_BUCKET" --member="serviceAccount:$SA_EMAIL" --role="roles/storage.objectAdmin" --quiet | Out-Null
 
 # ---------------------------------------------------------------------------
-# 4. Deploy the Cloud Run service (root Dockerfile, --source .)
+# 4. DASHBOARD_API_KEY lives in Secret Manager (never in env vars / revision YAML)
 # ---------------------------------------------------------------------------
-Write-Host "4/4  Deploying Cloud Run service $SERVICE ..." -ForegroundColor Yellow
+$SECRET_NAME = "acumen-dashboard-key"
+Write-Host "4/5  Ensuring Secret Manager secret $SECRET_NAME ..." -ForegroundColor Yellow
+gcloud secrets describe $SECRET_NAME --project=$PROJECT --quiet 2>$null | Out-Null
+if (-not $?) {
+    gcloud secrets create $SECRET_NAME --replication-policy="automatic" --project=$PROJECT --quiet
+    if (-not $ApiKey) {
+        Write-Host "     ERROR: secret $SECRET_NAME has no versions yet - re-run with -ApiKey 'your-strong-secret'" -ForegroundColor Red
+        exit 1
+    }
+}
+if ($ApiKey) {
+    Write-Host "     Adding new secret version (key rotation)"
+    $ApiKey | gcloud secrets versions add $SECRET_NAME --data-file=- --project=$PROJECT --quiet
+}
+
+# ---------------------------------------------------------------------------
+# 5. Deploy the Cloud Run service (root Dockerfile, --source .)
+# ---------------------------------------------------------------------------
+Write-Host "5/5  Deploying Cloud Run service $SERVICE ..." -ForegroundColor Yellow
 
 # Use gcloud's alternate-delimiter syntax (^@^) because CORS_ORIGIN may itself
 # contain commas (multiple origins) and gcloud splits env-var pairs on commas.
 $envVars = "^@^GOOGLE_CLOUD_PROJECT=$PROJECT@BQ_LOCATION=$REGION@CORS_ORIGIN=$CorsOrigin"
-if ($ApiKey)   { $envVars = "$envVars@DASHBOARD_API_KEY=$ApiKey" }
 if ($JwksUrl)  { $envVars = "$envVars@AUTH_JWKS_URL=$JwksUrl" }
 if ($Issuer)   { $envVars = "$envVars@AUTH_ISSUER=$Issuer" }
 if ($Audience) { $envVars = "$envVars@AUTH_AUDIENCE=$Audience" }
-
-if (-not $ApiKey -and -not $JwksUrl) {
-    Write-Host "     NOTE: Neither -ApiKey nor -JwksUrl set." -ForegroundColor DarkYellow
-    Write-Host "           /api/live/* will return 503 until DASHBOARD_API_KEY is configured." -ForegroundColor DarkYellow
-    Write-Host "           Re-run: .\scripts\deploy_dashboard.ps1 -ApiKey 'your-strong-secret'" -ForegroundColor DarkYellow
-}
 
 gcloud run deploy $SERVICE `
     --source=. `
@@ -88,6 +104,7 @@ gcloud run deploy $SERVICE `
     --service-account=$SA_EMAIL `
     --allow-unauthenticated `
     --set-env-vars=$envVars `
+    --set-secrets="DASHBOARD_API_KEY=${SECRET_NAME}:latest" `
     --memory=1Gi `
     --cpu=1 `
     --min-instances=0 `

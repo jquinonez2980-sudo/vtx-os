@@ -73,6 +73,10 @@ def _api_checks() -> None:
             return _FakeKey(pub)
 
     auth_mod._jwks_client = lambda: _FakeJWKS()  # bypass the network JWKS fetch
+    # require_user only enters the JWKS branch when AUTH_JWKS_URL is set; without
+    # it (and without DASHBOARD_API_KEY) the server correctly answers 503 — so the
+    # test must mark JWKS as "configured" for the 401/200 paths to be reachable.
+    auth_mod.AUTH_JWKS_URL = "https://test.invalid/.well-known/jwks.json"
     hdr = {"Authorization": f"Bearer {token}"}
 
     with TestClient(app) as client:

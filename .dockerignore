@@ -1,0 +1,45 @@
+# Keep client data, credentials, and dev artifacts OUT of the Docker image.
+# Docker does NOT read .gitignore — this file is the only gate.
+
+# Real client data — NEVER ship
+data/
+
+# Credentials and live config — NEVER ship (templates are fine)
+# NOTE: config/client_accounts.csv is intentionally INCLUDED — the container
+# reads it at VTX_CLIENT_REGISTRY=/app/config/client_accounts.csv
+config/*.json
+config/project.env
+!config/gcs_lifecycle_exports.json
+*.env
+.env*
+
+# Claude Code tooling + prod write log
+.claude/
+.claudeignore
+
+# Dev environment
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+
+# Tests and demo inputs not needed at runtime
+tests/
+demo/*.csv
+
+# Sage 50 artifacts
+*.SAI
+*.SAJ
+sage50_bridge/obj/
+sage50_bridge/bin/
+
+# Docs / project meta not needed in container
+docs/
+PROJECT_STATUS.md
+CLAUDE.md
+*.md
+!dashboard/**/*.md
+
+# Deploy scripts themselves
+scripts/deploy_dashboard.ps1

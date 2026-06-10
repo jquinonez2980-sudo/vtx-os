@@ -59,10 +59,11 @@ def _decode(token: str) -> dict[str, Any]:
 def require_user(request: Request) -> dict[str, Any]:
     """FastAPI dependency — validate the bearer token or raise 401.
 
-    Dev bypass: when AUTH_JWKS_URL is not configured, any non-empty Bearer token
-    is accepted and the sub/email are taken from a simple base64-decoded payload
-    (no signature check). This lets the dashboard work locally without a Clerk/Auth0
-    setup. Never deploy to production without AUTH_JWKS_URL set.
+    Accepted credentials, in order:
+      1. Exact DASHBOARD_API_KEY match (timing-safe) — the standalone SPA path.
+      2. A provider JWT verified against AUTH_JWKS_URL (Clerk/Auth0) when configured.
+    If neither env var is configured the server answers 503 — there is NO dev
+    bypass; an unconfigured deployment never accepts any token.
     """
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):

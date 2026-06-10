@@ -1,0 +1,41 @@
+# CI — compile gate + lint + offline smoke suite.
+# Offline tests mock all GCP services (see tests/test_smoke_suite.py); no auth,
+# no secrets, no prod writes. Live tests (*_live*.py) are deliberately excluded.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      # pyodbc (Sage 50 ODBC path) needs unixODBC headers to build on Linux.
+      - name: System deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends unixodbc-dev
+
+      - name: Install
+        run: pip install -r requirements.txt ruff
+
+      - name: Compile all Python
+        run: python -m compileall -q agents core sage50 dashboard models scripts functions tests main.py
+
+      - name: Lint (errors only — undefined names, syntax, unused imports)
+        run: ruff check .
+
+      - name: Offline smoke suite
+        run: python -m pytest tests/test_smoke_suite.py -v
