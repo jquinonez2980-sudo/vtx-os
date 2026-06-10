@@ -46,16 +46,28 @@ def main() -> int:
                     help="path to a prior run log; re-post ONLY the entries that "
                          "FAILED there (by their deterministic position), so the "
                          "already-posted entries are never duplicated")
+    ap.add_argument("--from-date", default=None,
+                    help="only fetch/post entries on or after this date (YYYY-MM-DD). "
+                         "Use to re-post a date range without duplicating earlier entries.")
+    ap.add_argument("--no-dedupe", action="store_true",
+                    help="skip the Sage-side duplicate check before posting "
+                         "(default: entries already in Sage GL are skipped)")
+    ap.add_argument("--no-backup", action="store_true",
+                    help="skip the pre-post .SAI/.SAJ backup (default: backup before --commit)")
     args = ap.parse_args()
 
     from google.cloud import bigquery
     c = bigquery.Client(project=PROJECT)
+    date_clause = ""
+    bq_params = [bigquery.ScalarQueryParameter("a", "STRING", args.account)]
+    if args.from_date:
+        date_clause = " AND txn_date >= @from_date"
+        bq_params.append(bigquery.ScalarQueryParameter("from_date", "DATE", args.from_date))
     rows = list(c.query(
         "SELECT txn_date, description, amount, gl_account_no, needs_review "
         "FROM vtx_accounting.bank_transactions_categorized "
-        "WHERE account_no=@a ORDER BY txn_date, description",
-        job_config=bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("a", "STRING", args.account)])
+        f"WHERE account_no=@a{date_clause} ORDER BY txn_date, description",
+        job_config=bigquery.QueryJobConfig(query_parameters=bq_params)
     ).result())
     print(f"BQ categorized rows for {args.account}: {len(rows)}")
     if not rows:
@@ -141,6 +153,64 @@ def main() -> int:
     if not args.sai:
         print("ERROR: --sai is required for --commit")
         return 1
+
+    # ── Pre-post backup: copy the .SAI file + companion .SAJ folder ─────────
+    # One bad batch into a live company file has no undo; this is the undo.
+    if not args.no_backup:
+        import shutil
+        from datetime import datetime
+        sai_path = Path(args.sai)
+        saj_path = sai_path.with_suffix(".SAJ")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        bdir = sai_path.parent / "vtx_backup" / f"{sai_path.stem}_{stamp}"
+        bdir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sai_path, bdir / sai_path.name)
+        if saj_path.is_dir():
+            shutil.copytree(saj_path, bdir / saj_path.name)
+        print(f"[backup] {sai_path.name}"
+              + (f" + {saj_path.name}/" if saj_path.is_dir() else "")
+              + f" -> {bdir}")
+
+    # ── Sage-side duplicate check (same key as JournalEntryAgent) ───────────
+    # Key: (entry_date_iso, description_39chars, abs_amount_2dp). Reads existing
+    # BNK lines from the GL over the batch's date range and skips matches, so
+    # re-running this script can never double-post.
+    if not args.no_dedupe:
+        from datetime import date as _date
+        from sage50.bridge_reader import fetch_gl_transactions
+        d_lo = min(_date.fromisoformat(e["date"]) for e in entries)
+        d_hi = max(_date.fromisoformat(e["date"]) for e in entries)
+        try:
+            existing_rows = fetch_gl_transactions(
+                start_date=d_lo, end_date=d_hi,
+                sai_file=args.sai, user=args.user,
+            )
+        except Exception as exc:
+            print(f"ERROR: Sage duplicate check failed ({exc}).\n"
+                  f"Refusing to post blind — re-run with --no-dedupe to override.")
+            return 1
+        existing_keys = {
+            (r.transaction_date.isoformat(), r.description[:39],
+             f"{max(r.debit, r.credit):.2f}")
+            for r in existing_rows
+            if r.source.upper() == "BNK" and r.transaction_date is not None
+        }
+        kept, skipped = [], 0
+        for e in entries:
+            key = (e["date"], e["comment"], f"{e['lines'][0]['debit']:.2f}")
+            if key in existing_keys:
+                skipped += 1
+                print(f"  [dedupe] SKIP already in Sage: {e['date']}  {e['comment']}")
+            else:
+                kept.append(e)
+        if skipped:
+            print(f"[dedupe] skipped {skipped} entr{'y' if skipped == 1 else 'ies'} "
+                  f"already posted; {len(kept)} remain")
+        entries = kept
+        if not entries:
+            print("[dedupe] nothing left to post — all entries already in Sage.")
+            return 0
+
     print(f"\n[commit] posting {len(entries)} entries to {args.sai} ...")
     from sage50.bridge_reader import post_journal_entries
     res = post_journal_entries(entries, sai_file=args.sai, user=args.user)
