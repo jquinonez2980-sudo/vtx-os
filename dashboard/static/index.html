@@ -2975,22 +2975,31 @@ function _cinemaOcean() {
   const W = () => host.clientWidth, H = () => host.clientHeight;
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x050f1c, 0.0042);
-  const cam = new THREE.PerspectiveCamera(58, W() / H(), 1, 600);
-  cam.position.set(0, 26, 92);
-  cam.lookAt(0, -4, 0);
+  const cam = new THREE.PerspectiveCamera(55, W() / H(), 1, 600);
+  cam.position.set(0, 14, 96);
+  cam.lookAt(0, -18, -30);                       // horizon low — copy floats above it
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(W(), H());
   host.appendChild(renderer.domElement);
 
-  const COLS = 150, ROWS = 54, SEP = 2.6, N = COLS * ROWS;
+  // round glow sprite — square points read as blocks, not particles
+  const spr = document.createElement('canvas'); spr.width = spr.height = 64;
+  const sx = spr.getContext('2d');
+  const g = sx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  sx.fillStyle = g; sx.fillRect(0, 0, 64, 64);
+  const sprite = new THREE.CanvasTexture(spr);
+
+  const COLS = 130, ROWS = 46, SEP = 3.0, N = COLS * ROWS;
   const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
-  const cBase = new THREE.Color(0x1d4f80), cTeal = new THREE.Color(0x14b8a6),
+  const cBase = new THREE.Color(0x16456f), cTeal = new THREE.Color(0x14b8a6),
         cGold = new THREE.Color(0xd9a21b);
   let p = 0;
   for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
     pos[p]     = (x - COLS / 2) * SEP;
-    pos[p + 1] = 0;
+    pos[p + 1] = -16;                            // the field is a FLOOR, not a wall
     pos[p + 2] = (z - ROWS / 2) * SEP;
     const r = Math.random();
     const c = r < 0.05 ? cGold : (r < 0.10 ? cTeal : cBase);
@@ -3001,7 +3010,7 @@ function _cinemaOcean() {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const mat = new THREE.PointsMaterial({
-    size: 1.5, vertexColors: true, transparent: true, opacity: 0.8,
+    size: 2.1, map: sprite, vertexColors: true, transparent: true, opacity: 0.55,
     blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
   });
   scene.add(new THREE.Points(geo, mat));
@@ -3021,16 +3030,16 @@ function _cinemaOcean() {
   const tick = () => {
     raf = requestAnimationFrame(tick);
     if (!_ldActive || document.hidden) return;     // pause: no work while hidden
-    t += 0.012;
+    t += 0.011;
     let i = 0;
     for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
-      arr[i * 3 + 1] = Math.sin(x * 0.22 + t) * 1.7 + Math.cos(z * 0.18 + t * 0.7) * 1.7;
+      arr[i * 3 + 1] = -16 + Math.sin(x * 0.20 + t) * 1.9 + Math.cos(z * 0.16 + t * 0.7) * 1.9;
       i++;
     }
     geo.attributes.position.needsUpdate = true;
-    cam.position.x += (mx * 14 - cam.position.x) * 0.04;
-    cam.position.y += (26 - my * 8 - cam.position.y) * 0.04;
-    cam.lookAt(0, -4, 0);
+    cam.position.x += (mx * 12 - cam.position.x) * 0.04;
+    cam.position.y += (14 - my * 6 - cam.position.y) * 0.04;
+    cam.lookAt(0, -18, -30);
     renderer.render(scene, cam);
   };
   tick();

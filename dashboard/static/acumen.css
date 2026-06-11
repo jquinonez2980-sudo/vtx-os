@@ -1475,7 +1475,18 @@ tbody tr.selected td { background: var(--teal-50); }
 /* hero v3: full-viewport stage */
 .ld-hero { min-height: calc(92vh - 70px); display: flex; flex-direction: column;
            justify-content: center; position: relative; z-index: 5; }
-.ld-h1 { perspective: 800px; }
+/* the copy owns its zone: soft scrim pushes the particle field back */
+.ld-hero::before {
+  content: ''; position: absolute; inset: -6% -30%; z-index: -1;
+  background: radial-gradient(ellipse 60% 52% at 50% 46%,
+              rgba(5,15,28,0.92) 0%, rgba(5,15,28,0.55) 55%, transparent 78%);
+  pointer-events: none;
+}
+.ld-h1 { perspective: 800px;
+         font-size: clamp(42px, 7.2vw, 80px);
+         text-shadow: 0 2px 36px rgba(2,8,16,0.6); }
+.ld-sub { text-shadow: 0 1px 18px rgba(2,8,16,0.7); }
+.ld-eyebrow { width: fit-content; margin-left: auto; margin-right: auto; }
 .ld-h1 em {
   font-family: 'Fraunces', Georgia, serif; font-style: italic; font-weight: 600;
   letter-spacing: 0; color: var(--gold-400);
