@@ -26,7 +26,7 @@ import pathlib
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -108,6 +108,63 @@ def _load_clients_meta() -> dict:
     except Exception:
         pass
     return {}
+
+
+# --------------------------------------------------------------------------- #
+# Public — early-access signup (landing page lead capture)
+# --------------------------------------------------------------------------- #
+
+_SIGNUP_BUCKET: dict[str, list[float]] = {}   # naive per-instance rate limit
+
+
+@app.post("/api/signup")
+def public_signup(
+    email: str,
+    name: str = "",
+    firm: str = "",
+    clients: str = "",
+    website: str = "",          # honeypot — real users never fill this
+    request: Request = None,
+) -> dict[str, Any]:
+    """PUBLIC lead capture for the landing page. No auth by design; defended by
+    honeypot + per-IP rate limit + strict validation. Writes via DML."""
+    import re as _re
+    import time as _time
+
+    if website:                                  # bot filled the honeypot
+        return {"ok": True}                      # pretend success, store nothing
+    email = email.strip().lower()[:200]
+    if not _re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+
+    ip = (request.client.host if request and request.client else "?")
+    now = _time.time()
+    hits = [t for t in _SIGNUP_BUCKET.get(ip, []) if now - t < 3600]
+    if len(hits) >= 5:
+        raise HTTPException(status_code=429, detail="Too many signups — try later")
+    _SIGNUP_BUCKET[ip] = hits + [now]
+
+    from google.cloud import bigquery as _bqm
+
+    from core.bq_loader import PROJECT, _bq, ensure_table
+    from models.signup import EarlySignup
+
+    rec = EarlySignup(email=email, name=name.strip()[:120],
+                      firm=firm.strip()[:160], clients=clients.strip()[:40])
+    ensure_table("vtx_accounting", "early_access_signups", EarlySignup)
+    _bq().query(
+        f"INSERT INTO `{PROJECT}.vtx_accounting.early_access_signups` "
+        "(signup_id, created_at, name, email, firm, clients, source) "
+        "VALUES (@i, CURRENT_TIMESTAMP(), @n, @e, @f, @c, 'landing')",
+        job_config=_bqm.QueryJobConfig(query_parameters=[
+            _bqm.ScalarQueryParameter("i", "STRING", rec.signup_id),
+            _bqm.ScalarQueryParameter("n", "STRING", rec.name),
+            _bqm.ScalarQueryParameter("e", "STRING", rec.email),
+            _bqm.ScalarQueryParameter("f", "STRING", rec.firm),
+            _bqm.ScalarQueryParameter("c", "STRING", rec.clients),
+        ]),
+    ).result()
+    return {"ok": True, "message": "You're on the list — we'll be in touch."}
 
 
 @app.get("/api/live/user")

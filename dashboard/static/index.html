@@ -773,8 +773,10 @@
         <div class="vh-sub">Send approved journal entries to Sage 50 via the Posting Agent</div>
       </div>
       <div class="vh-actions">
-        <span class="badge badge-green badge-dot">Sage 50 Connected</span>
-        <span style="font:400 12px/1 'Inter',sans-serif;color:var(--t3)">Last sync: 2h ago</span>
+        <span class="badge badge-gold badge-dot" id="sage-conn-badge" role="button"
+              style="cursor:pointer" title="Refresh posting jobs"
+              onclick="loadUnposted(); if (getToken()) loadPostRequests();">Demo data</span>
+        <span style="font:400 12px/1 'Inter',sans-serif;color:var(--t3)" id="sage-last-sync"></span>
       </div>
     </div>
 
@@ -2455,13 +2457,31 @@ async function postToSage() {
   }
 }
 
+function syncSageBadge(latest) {
+  const badge = document.getElementById('sage-conn-badge');
+  const sync  = document.getElementById('sage-last-sync');
+  if (!badge) return;
+  if (!getToken()) {
+    badge.className = 'badge badge-gold badge-dot';
+    badge.textContent = 'Demo data';
+    if (sync) sync.textContent = '';
+    return;
+  }
+  badge.className = 'badge badge-green badge-dot';
+  badge.textContent = 'Posting Agent · live';
+  if (sync) sync.textContent = latest
+    ? 'Last job: ' + String(latest).slice(0, 16).replace('T', ' ')
+    : 'No jobs yet';
+}
+
 async function loadPostRequests() {
-  if (!getToken()) return;
+  if (!getToken()) { syncSageBadge(null); return; }
   try {
     const c = currentClient || {};
     const acctParam = (c.account_masked || c.acct)
       ? '?account_no=' + encodeURIComponent(c.account_masked || c.acct) : '';
     const data = await apiFetch('/api/ops/post-requests' + acctParam);
+    syncSageBadge(Array.isArray(data) && data[0] ? (data[0].completed_at || data[0].requested_at) : null);
     const tbody = document.getElementById('sage-history');
     if (!tbody || !Array.isArray(data)) return;
     if (!data.length) {
@@ -2799,11 +2819,79 @@ const MOCK_REPORTS = {
 
 // ════════════════════════════════════════ DEMO LANDING
 function showDemoLanding() {
-  document.getElementById('demo-landing')?.classList.remove('hidden');
+  const ld = document.getElementById('demo-landing');
+  if (ld) { ld.classList.remove('hidden'); ld.scrollTop = 0; }
   document.getElementById('signin-overlay')?.classList.add('hidden');
+  document.body.style.overflow = 'hidden';     // lock the app behind the landing
+  initLandingFx();
+}
+
+// ── landing page behaviors ──────────────────────────────────────────────
+let _ldFxDone = false;
+function initLandingFx() {
+  const ld = document.getElementById('demo-landing');
+  if (!ld || _ldFxDone) {
+    // still re-trigger reveals already in view on revisit
+    document.querySelectorAll('.ld-reveal').forEach(el => el.classList.add('in'));
+    return;
+  }
+  _ldFxDone = true;
+  // sticky nav shadow
+  ld.addEventListener('scroll', () => {
+    document.getElementById('ld-nav')?.classList.toggle('scrolled', ld.scrollTop > 8);
+  }, { passive: true });
+  // scroll reveals
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => {
+      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    }), { root: ld, threshold: 0.12 });
+    document.querySelectorAll('.ld-reveal').forEach(el => io.observe(el));
+  } else {
+    document.querySelectorAll('.ld-reveal').forEach(el => el.classList.add('in'));
+  }
+}
+
+function ldScroll(where) {
+  const ld = document.getElementById('demo-landing');
+  if (!ld) return;
+  if (where === 'top') { ld.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  const el = document.getElementById('ld-' + where);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function openTourChapter(idx) {
+  openVideoTour();
+  const ch = DEMO_CHAPTERS[idx];
+  if (ch && DEMO_VIDEO_SRC) setTimeout(() => seekChapter(ch.t), 600);
+}
+
+async function submitSignup(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const email = (document.getElementById('ls-email')?.value || '').trim();
+  if (!email) { showToast('Enter your work email', 'warning'); return; }
+  const btn = document.getElementById('ls-submit');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const qs = new URLSearchParams({
+      email,
+      name:    (document.getElementById('ls-name')?.value || '').trim(),
+      firm:    (document.getElementById('ls-firm')?.value || '').trim(),
+      clients: document.getElementById('ls-clients')?.value || '',
+      website: document.getElementById('ls-website')?.value || '',   // honeypot
+    });
+    const resp = await fetch('/api/signup?' + qs.toString(), { method: 'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+    document.getElementById('ld-signup-form').style.display = 'none';
+    document.getElementById('ld-signup-success').style.display = 'block';
+  } catch (err) {
+    showToast('Signup failed: ' + (err.message || err), 'warning');
+    if (btn) { btn.disabled = false; btn.textContent = 'Request early access'; }
+  }
 }
 function hideDemoLanding() {
   document.getElementById('demo-landing')?.classList.add('hidden');
+  document.body.style.overflow = '';
 }
 function startInteractiveDemo() {
   hideDemoLanding();
@@ -2874,11 +2962,23 @@ async function renderReports() {
   if (!getToken()) {
     if (sub)   sub.textContent   = 'Synthetic demo data · May 2026';
     if (badge) badge.style.display = '';
+    // restore the synthetic client-activity rows (overwritten in live mode)
+    const actBody0 = document.getElementById('rpt-client-activity-tbody');
+    if (actBody0 && window._rptActivityMockHTML) actBody0.innerHTML = window._rptActivityMockHTML;
+    const actSub0 = document.getElementById('rpt-activity-sub');
+    if (actSub0) actSub0.textContent = 'May 2026 · all clients';
     renderReportCards(null, null, null);
     return;
   }
   if (badge) badge.style.display = 'none';
   if (sub) sub.textContent = 'Live data · ' + (currentPeriod || '—');
+  // Client Activity table is synthetic-only — never show fake clients in live mode
+  const actBody = document.getElementById('rpt-client-activity-tbody');
+  if (actBody) actBody.innerHTML =
+    '<tr><td colspan="6" style="text-align:center;padding:28px;color:var(--t3);font-size:13px">' +
+    'Per-client activity report is coming soon — use the Clients view for live client data</td></tr>';
+  const actSub = document.getElementById('rpt-activity-sub');
+  if (actSub) actSub.textContent = (currentPeriod || '—') + ' · live';
   try {
     const [sumRes, hstRes, reconRes] = await Promise.allSettled([
       apiFetch('/api/live/summary?period=' + currentPeriod),
@@ -2954,38 +3054,157 @@ if (!getToken()) {
   loadUnposted();
   fetchLiveHST(currentPeriod);
 }
+// Snapshot synthetic report rows so demo mode can restore them after a live session
+window._rptActivityMockHTML = document.getElementById('rpt-client-activity-tbody')?.innerHTML || '';
 // Close video modal on Escape
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVideoTour(); });
 </script>
 
-<!-- ══════════════════════════════════════ DEMO LANDING PAGE -->
+<!-- ══════════════════════════════════════ LANDING PAGE -->
 <div id="demo-landing" class="demo-landing hidden">
-  <div class="demo-landing-card">
-    <div class="mark" style="margin:0 auto 24px"></div>
-    <div class="signin-title">AcumenAI</div>
-    <div class="signin-sub" style="margin-top:4px;margin-bottom:0">by Orchelix · Accounting OS</div>
-    <p class="demo-landing-tagline">
-      Books that reconcile themselves.<br>
-      See the full workflow — from inbox to Sage 50 — in 10 minutes.
+  <div class="ld-glow g1"></div><div class="ld-glow g2"></div><div class="ld-glow g3"></div>
+
+  <nav class="ld-nav" id="ld-nav">
+    <div class="ld-nav-brand" onclick="ldScroll('top')">
+      <div class="mark"></div>
+      <div><b>AcumenAI</b><br><span>by Orchelix</span></div>
+    </div>
+    <div class="ld-nav-links">
+      <a onclick="ldScroll('how')">How it works</a>
+      <a onclick="ldScroll('agents')">The agents</a>
+      <a onclick="openVideoTour()">Product tour</a>
+      <a onclick="ldScroll('access')">Early access</a>
+    </div>
+    <div class="ld-nav-cta">
+      <button class="ld-btn ld-btn-ghost" onclick="hideDemoLanding(); showSignIn()">Sign in</button>
+      <button class="ld-btn ld-btn-gold" onclick="startInteractiveDemo()">Try the demo</button>
+    </div>
+  </nav>
+
+  <header class="ld-hero" id="ld-top">
+    <span class="ld-eyebrow" onclick="ldScroll('access')"><span class="dot"></span>
+      Trusted with the books of 125+ Canadian businesses</span>
+    <h1 class="ld-h1">Books that close <em>themselves.</em></h1>
+    <p class="ld-sub">
+      AcumenAI is the AI accounting OS for Canadian firms. Bank statements flow in from
+      Gmail; reviewed, CRA-defensible Sage 50 entries flow out — with you approving
+      every judgment call.
     </p>
-    <button onclick="openVideoTour()" class="btn demo-tour-btn">
-      ▶&nbsp; Start Product Tour
-    </button>
-    <button onclick="startInteractiveDemo()" class="btn demo-explore-btn">
-      Explore Interactive Demo
-    </button>
-    <a role="button" onclick="hideDemoLanding(); showSignIn()" class="demo-signin-link">
-      Already have access? Sign in →
-    </a>
-    <div class="demo-chapter-pills">
-      <span class="demo-chapter-pill">Client Onboarding</span>
-      <span class="demo-chapter-pill">Gmail Watcher</span>
-      <span class="demo-chapter-pill">Review Entries</span>
-      <span class="demo-chapter-pill">HST Agent</span>
-      <span class="demo-chapter-pill">Sage 50 Posting</span>
-      <span class="demo-chapter-pill">Reports</span>
+    <div class="ld-hero-ctas">
+      <button class="ld-btn ld-btn-gold ld-btn-lg" onclick="openVideoTour()">▶&nbsp; Watch the tour</button>
+      <button class="ld-btn ld-btn-ghost ld-btn-lg" onclick="startInteractiveDemo()">Explore the live demo →</button>
+    </div>
+    <a class="ld-hero-signin" role="button" onclick="hideDemoLanding(); showSignIn()">Already have access? Sign in →</a>
+  </header>
+
+  <div class="ld-shot ld-reveal">
+    <div class="ld-frame">
+      <div class="ld-frame-bar"><i></i><i></i><i></i>
+        <span class="ld-frame-url">app.acumenai.ca / review-entries</span></div>
+      <div class="ld-mock">
+        <div class="ld-mock-kpis">
+          <div class="ld-mock-kpi"><div class="l">Active Clients</div><div class="v">125</div><div class="d">+3 this month</div></div>
+          <div class="ld-mock-kpi"><div class="l">Auto-categorized</div><div class="v">84%</div><div class="d">↑ learning weekly</div></div>
+          <div class="ld-mock-kpi"><div class="l">Pending review</div><div class="v">17</div><div class="d">8 min est.</div></div>
+          <div class="ld-mock-kpi"><div class="l">Posted to Sage 50</div><div class="v">395</div><div class="d">one click</div></div>
+        </div>
+        <div class="ld-mock-table">
+          <div class="ld-mock-row h"><span>Date</span><span>Description</span><span>GL</span><span>Amount</span><span>Confidence</span></div>
+          <div class="ld-mock-row"><span class="m">01-08</span><span>Online Bill Payment — HYDRO QUEBEC</span><span class="m">5790</span><span class="m">293.90</span><span><span class="ld-conf hi">0.95 auto</span></span></div>
+          <div class="ld-mock-row"><span class="m">01-08</span><span>INTERAC e-Transfer Received</span><span class="m">4020</span><span class="m">682.48</span><span><span class="ld-conf hi">0.95 auto</span></span></div>
+          <div class="ld-mock-row"><span class="m">01-12</span><span>Pre-Authorized Payment — BENEVA</span><span class="m">5688</span><span class="m">181.62</span><span><span class="ld-conf hi">0.92 auto</span></span></div>
+          <div class="ld-mock-row"><span class="m">01-15</span><span>CHQ#363 — City of Toronto</span><span class="m">5800</span><span class="m">1,905.00</span><span><span class="ld-conf md">review</span></span></div>
+        </div>
+      </div>
     </div>
   </div>
+
+  <div class="ld-trust ld-reveal">
+    <div><b>125+</b><span>Canadian businesses</span></div>
+    <div><b>7</b><span>banks auto-parsed</span></div>
+    <div><b>100%</b><span>human-approved entries</span></div>
+    <div><b>CRA</b><span>defensible audit trail</span></div>
+  </div>
+
+  <section class="ld-section" id="ld-how">
+    <div class="ld-kicker">How it works</div>
+    <h2 class="ld-h2">From inbox to posted ledger in three steps</h2>
+    <p class="ld-section-sub">No exports, no re-keying, no mystery categorizations.
+       Every transaction carries its confidence score and its audit trail.</p>
+    <div class="ld-steps ld-reveal">
+      <div class="ld-step"><div class="num">01</div><h3>Statements arrive</h3>
+        <p>Clients email statements as usual. AcumenAI watches the inbox, recognizes
+           PDFs and CSVs from RBC, TD, BMO, CIBC, Scotiabank, Desjardins and National Bank,
+           and extracts every transaction — validated against the running balance.</p></div>
+      <div class="ld-step"><div class="num">02</div><h3>You review the judgment calls</h3>
+        <p>Client-specific rules categorize the routine — typically 80%+. The rest queues
+           for one-click review with suggested GL codes. Approve, correct, or reject;
+           your decision is what posts. Nothing moves without it.</p></div>
+      <div class="ld-step"><div class="num">03</div><h3>One click to Sage 50</h3>
+        <p>Approved entries post as balanced journal entries — duplicate-checked against
+           the ledger, backed up first, every step written to an immutable audit log.
+           QuickBooks Online support is on the roadmap.</p></div>
+    </div>
+  </section>
+
+  <section class="ld-section" id="ld-agents">
+    <div class="ld-kicker">Under the hood</div>
+    <h2 class="ld-h2">A team of specialist agents, one orchestrator</h2>
+    <p class="ld-section-sub">Each stage of the close has a dedicated agent.
+       Click any of them to see that part of the product tour.</p>
+    <div class="ld-agents ld-reveal">
+      <button class="ld-agent" onclick="openTourChapter(2)"><b>Ingestion &amp; OCR</b><span>Statement parsing across 7 banks, three-tier OCR with balance-chain validation.</span><span class="go">See it in the tour →</span></button>
+      <button class="ld-agent" onclick="openTourChapter(3)"><b>Bookkeeping</b><span>Per-client rulesets that learn your chart of accounts and history.</span><span class="go">See it in the tour →</span></button>
+      <button class="ld-agent" onclick="openTourChapter(4)"><b>HST &amp; Compliance</b><span>GST/HST tracking with CRA rules baked in, GST34-ready summaries.</span><span class="go">See it in the tour →</span></button>
+      <button class="ld-agent" onclick="openTourChapter(5)"><b>Sage 50 Posting</b><span>Balanced, deduplicated journal entries — backups before every batch.</span><span class="go">See it in the tour →</span></button>
+      <button class="ld-agent" onclick="openTourChapter(3)"><b>Reconciliation</b><span>Transaction matching with exception flagging against the GL.</span><span class="go">See it in the tour →</span></button>
+      <button class="ld-agent" onclick="openTourChapter(6)"><b>Financial Statements</b><span>Year-end worksheets and reports generated from reconciled data.</span><span class="go">See it in the tour →</span></button>
+      <button class="ld-agent" onclick="openTourChapter(6)"><b>Tax Preparation</b><span>T2-ready data, Cantax integration on the roadmap.</span><span class="go">See it in the tour →</span></button>
+      <button class="ld-agent" onclick="openTourChapter(7)"><b>Orchestrator</b><span>Pipeline state, handoffs, and human-in-the-loop approvals across all agents.</span><span class="go">See it in the tour →</span></button>
+    </div>
+  </section>
+
+  <section class="ld-access" id="ld-access">
+    <div class="ld-access-card">
+      <div class="ld-kicker">Early access</div>
+      <h2 class="ld-h2" style="font-size:clamp(22px,3.4vw,32px)">Put your firm's books on autopilot</h2>
+      <p class="ld-section-sub" style="margin-bottom:0">We onboard a small number of Canadian
+         firms each month. Tell us about yours and we'll reach out with next steps.</p>
+      <form class="ld-form" id="ld-signup-form" onsubmit="submitSignup(event)">
+        <input class="ld-input" id="ls-name" type="text" placeholder="Your name" autocomplete="name">
+        <input class="ld-input" id="ls-firm" type="text" placeholder="Firm / company" autocomplete="organization">
+        <input class="ld-input full" id="ls-email" type="email" required placeholder="Work email *" autocomplete="email">
+        <select class="ld-select full" id="ls-clients">
+          <option value="">How many sets of books? (optional)</option>
+          <option>1–10</option><option>11–50</option><option>51–150</option><option>150+</option>
+        </select>
+        <input class="ld-input" id="ls-website" type="text" tabindex="-1" autocomplete="off"
+               style="position:absolute;left:-9999px" aria-hidden="true">
+        <button type="submit" class="ld-btn ld-btn-gold ld-btn-lg full" id="ls-submit">Request early access</button>
+      </form>
+      <div class="ld-success" id="ld-signup-success">
+        <div class="check">✓</div>
+        <h3 style="font:700 19px/1.3 var(--font-display);color:#fff;margin-bottom:8px">You're on the list</h3>
+        <p style="font:400 13.5px/1.6 var(--font-display);color:rgba(234,242,255,0.6)">
+          We'll be in touch shortly. Meanwhile, take the
+          <a role="button" onclick="startInteractiveDemo()" style="color:var(--gold-400);cursor:pointer">interactive demo</a>
+          or <a role="button" onclick="openVideoTour()" style="color:var(--gold-400);cursor:pointer">watch the tour</a>.
+        </p>
+      </div>
+      <div class="ld-form-note">No spam, no card. Your email is used only to arrange onboarding.</div>
+    </div>
+  </section>
+
+  <footer class="ld-footer">
+    <div class="copy">© 2026 Orchelix · AcumenAI — Accounting OS for Canadian SMBs</div>
+    <nav>
+      <a href="https://www.orchelix.com" target="_blank" rel="noopener">orchelix.com</a>
+      <a href="https://www.orchelix.com/book" target="_blank" rel="noopener">Book a live demo</a>
+      <a onclick="openVideoTour()">Product tour</a>
+      <a onclick="startInteractiveDemo()">Interactive demo</a>
+      <a onclick="hideDemoLanding(); showSignIn()">Sign in</a>
+    </nav>
+  </footer>
 </div>
 
 <!-- ══════════════════════════════════════ VIDEO TOUR MODAL -->

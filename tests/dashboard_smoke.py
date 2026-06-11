@@ -87,6 +87,14 @@ def _api_checks() -> None:
         check("GET /api/demo/run -> 200 + five beats",
               demo.status_code == 200 and "ingest" in demo.json().get("beats", {}))
 
+        # Public signup (landing page): bot honeypot short-circuits before BQ;
+        # invalid email rejected with 422.
+        check("POST /api/signup honeypot -> 200 ok, no store",
+              client.post("/api/signup", params={"email": "bot@x.com", "website": "spam"})
+                    .json().get("ok") is True)
+        check("POST /api/signup invalid email -> 422",
+              client.post("/api/signup", params={"email": "not-an-email"}).status_code == 422)
+
         # Auth gate
         check("live/summary no token -> 401",
               client.get("/api/live/summary", params={"period": "2025-12"}).status_code == 401)
