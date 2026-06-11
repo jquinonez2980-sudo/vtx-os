@@ -1440,11 +1440,116 @@ tbody tr.selected td { background: var(--teal-50); }
                text-decoration: none; cursor: pointer; transition: color 150ms; }
 .ld-footer a:hover { color: #fff; }
 
-/* ── entrance reveal ── */
+/* ── entrance reveal (no-JS / no-GSAP fallback) ── */
 @media (prefers-reduced-motion: no-preference) {
   .ld-reveal { opacity: 0; transform: translateY(18px);
                transition: opacity 600ms var(--ease), transform 600ms var(--ease); }
   .ld-reveal.in { opacity: 1; transform: none; }
+}
+
+/* ════════════════════════════════ CINEMATIC LAYER (v3) ════ */
+
+/* WebGL particle ocean behind the hero */
+.ld-canvas {
+  position: absolute; inset: 0; height: 110vh; max-height: 1100px;
+  pointer-events: none; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+          mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+}
+.ld-canvas canvas { display: block; }
+
+/* filmic grain over the whole landing */
+.ld-grain {
+  position: fixed; inset: -50%; width: 200%; height: 200%;
+  pointer-events: none; z-index: 4; opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ld-grain { animation: ld-grain-shift 0.9s steps(3) infinite; }
+  @keyframes ld-grain-shift {
+    0% { transform: translate(0,0) } 33% { transform: translate(-2%,1%) }
+    66% { transform: translate(1%,-2%) } 100% { transform: translate(0,0) }
+  }
+}
+
+/* hero v3: full-viewport stage */
+.ld-hero { min-height: calc(92vh - 70px); display: flex; flex-direction: column;
+           justify-content: center; position: relative; z-index: 5; }
+.ld-h1 { perspective: 800px; }
+.ld-h1 em {
+  font-family: 'Fraunces', Georgia, serif; font-style: italic; font-weight: 600;
+  letter-spacing: 0; color: var(--gold-400);
+  text-shadow: 0 0 44px rgba(217,162,27,0.35);
+}
+.ld-h1 .ch { display: inline-block; will-change: transform, opacity; }
+.ld-hero-scroll {
+  position: absolute; bottom: clamp(8px, 3vh, 28px); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: rgba(234,242,255,0.35); font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer;
+  transition: color 200ms; z-index: 6;
+}
+.ld-hero-scroll:hover { color: var(--gold-400); }
+.ld-hero-scroll .line { width: 1px; height: 34px; overflow: hidden;
+                        background: rgba(255,255,255,0.10); position: relative; }
+@media (prefers-reduced-motion: no-preference) {
+  .ld-hero-scroll .line::after {
+    content: ''; position: absolute; left: 0; top: -100%; width: 100%; height: 100%;
+    background: var(--gold-400); animation: ld-scroll-drip 1.8s var(--ease) infinite;
+  }
+  @keyframes ld-scroll-drip { 0% { top: -100% } 55% { top: 0 } 100% { top: 100% } }
+}
+
+/* content above canvas */
+.ld-nav, .ld-shot, .ld-trust, .ld-section, .ld-access, .ld-footer { position: relative; z-index: 5; }
+
+/* gold button: sheen sweep + magnetic-ready */
+.ld-btn-gold { position: relative; overflow: hidden; will-change: transform; }
+.ld-btn-gold::after {
+  content: ''; position: absolute; top: 0; left: -80%; width: 50%; height: 100%;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,0.55), transparent);
+  transform: skewX(-20deg); transition: left 0s;
+}
+.ld-btn-gold:hover::after { left: 130%; transition: left 650ms var(--ease); }
+
+/* product frame: 3D stage */
+.ld-shot { perspective: 1200px; }
+.ld-frame { transform-style: preserve-3d; will-change: transform; }
+.ld-mock-row.flash { animation: ld-row-flash 1.1s var(--ease); }
+@keyframes ld-row-flash {
+  0% { background: rgba(217,162,27,0.16) } 100% { background: transparent }
+}
+.ld-conf.pop { animation: ld-pop 420ms var(--ease); }
+@keyframes ld-pop { 0% { transform: scale(0.4); opacity: 0 } 70% { transform: scale(1.12) } 100% { transform: scale(1) } }
+
+/* bank marquee */
+.ld-marquee {
+  margin-top: clamp(40px, 7vh, 64px); overflow: hidden; position: relative; z-index: 5;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+          mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+}
+.ld-marquee-track { display: flex; gap: 56px; width: max-content; padding: 6px 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .ld-marquee-track { animation: ld-marquee-x 30s linear infinite; }
+  @keyframes ld-marquee-x { to { transform: translateX(-50%) } }
+}
+.ld-marquee span {
+  font: 700 13px/1 var(--font-display); letter-spacing: 0.22em;
+  color: rgba(234,242,255,0.28); white-space: nowrap; text-transform: uppercase;
+}
+.ld-marquee b { color: rgba(217,162,27,0.45); font-weight: 700; }
+
+/* big footer watermark */
+.ld-footer { position: relative; overflow: hidden; }
+.ld-footer-mark {
+  position: absolute; right: -10px; bottom: -34px; pointer-events: none;
+  font: 800 clamp(80px, 14vw, 160px)/0.8 var(--font-display); letter-spacing: -0.04em;
+  color: rgba(255,255,255,0.025); user-select: none; white-space: nowrap;
+}
+
+/* focus visibility (a11y) on dark landing */
+.demo-landing :is(a, button, input, select):focus-visible {
+  outline: 2px solid var(--gold-400); outline-offset: 3px; border-radius: 6px;
 }
 
 /* ─────────────────────────────────── VIDEO TOUR MODAL ─── */

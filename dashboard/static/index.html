@@ -13,7 +13,7 @@
   <meta property="og:url" content="https://acumenai-api-lscziarcxa-pd.a.run.app/">
   <meta name="twitter:card" content="summary">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23D9A21B'/%3E%3Cpath d='M16 7l7 18h-4.2l-1.4-3.8h-6.8L9.2 25H5L12 7h4zm-1.9 4.6l-2.3 6.2h4.6l-2.3-6.2z' fill='%231A1206'/%3E%3C/svg%3E">
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/acumen.css">
   <style>
     .dropdown {
@@ -2832,25 +2832,28 @@ function showDemoLanding() {
   if (ld) { ld.classList.remove('hidden'); ld.scrollTop = 0; }
   document.getElementById('signin-overlay')?.classList.add('hidden');
   document.body.style.overflow = 'hidden';     // lock the app behind the landing
+  syncLandingAuthState();
   initLandingFx();
 }
 
-// ── landing page behaviors ──────────────────────────────────────────────
-let _ldFxDone = false;
-function initLandingFx() {
+// ── landing page: cinematic engine ──────────────────────────────────────
+// GSAP + ScrollTrigger choreograph entrances/scroll; Three.js renders the
+// particle ocean. All lazy-loaded from CDN only when the landing shows,
+// skipped under prefers-reduced-motion, and fully degraded if CDNs fail.
+let _ldFxDone = false, _ldActive = false, _ldThree = null;
+const _ldReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function _ldLoadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+function _ldFallbackReveals() {
   const ld = document.getElementById('demo-landing');
-  if (!ld || _ldFxDone) {
-    // still re-trigger reveals already in view on revisit
-    document.querySelectorAll('.ld-reveal').forEach(el => el.classList.add('in'));
-    return;
-  }
-  _ldFxDone = true;
-  // sticky nav shadow
-  ld.addEventListener('scroll', () => {
-    document.getElementById('ld-nav')?.classList.toggle('scrolled', ld.scrollTop > 8);
-  }, { passive: true });
-  // scroll reveals
-  if ('IntersectionObserver' in window) {
+  if ('IntersectionObserver' in window && ld) {
     const io = new IntersectionObserver(es => es.forEach(e => {
       if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
     }), { root: ld, threshold: 0.12 });
@@ -2858,6 +2861,231 @@ function initLandingFx() {
   } else {
     document.querySelectorAll('.ld-reveal').forEach(el => el.classList.add('in'));
   }
+  document.querySelectorAll('.ld-count').forEach(el => { el.textContent = el.dataset.to; });
+}
+
+function initLandingFx() {
+  _ldActive = true;
+  const ld = document.getElementById('demo-landing');
+  if (!ld) return;
+  if (_ldFxDone) {
+    document.querySelectorAll('.ld-reveal').forEach(el => el.classList.add('in'));
+    if (window.ScrollTrigger) ScrollTrigger.refresh();
+    return;
+  }
+  _ldFxDone = true;
+  ld.addEventListener('scroll', () => {
+    document.getElementById('ld-nav')?.classList.toggle('scrolled', ld.scrollTop > 8);
+  }, { passive: true });
+
+  if (_ldReduced) { _ldFallbackReveals(); return; }
+
+  Promise.all([
+    _ldLoadScript('https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js')
+      .then(() => _ldLoadScript('https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js')),
+    _ldLoadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js').catch(() => null),
+  ]).then(() => {
+    gsap.registerPlugin(ScrollTrigger);
+    ScrollTrigger.defaults({ scroller: '#demo-landing' });
+    _cinemaHero();
+    _cinemaScroll();
+    if (window.THREE) _cinemaOcean();
+    _cinemaMockLoop();
+    _cinemaMagnetic();
+  }).catch(() => _ldFallbackReveals());
+}
+
+// hero entrance: word-by-word headline build, then staged supporting cast
+function _cinemaHero() {
+  const h1 = document.querySelector('.ld-h1');
+  if (h1 && !h1.dataset.split) {
+    h1.dataset.split = '1';
+    const splitNode = (node) => {
+      if (node.nodeType === 3) {
+        const frag = document.createDocumentFragment();
+        node.textContent.split(/(\s+)/).forEach(w => {
+          if (/^\s+$/.test(w)) { frag.appendChild(document.createTextNode(' ')); return; }
+          if (!w) return;
+          const span = document.createElement('span');
+          span.className = 'ch'; span.textContent = w;
+          frag.appendChild(span);
+        });
+        node.replaceWith(frag);
+      } else if (node.childNodes) {
+        [...node.childNodes].forEach(splitNode);
+      }
+    };
+    [...h1.childNodes].forEach(splitNode);
+  }
+  const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+  tl.from('.ld-eyebrow', { y: 24, autoAlpha: 0, duration: 0.7 })
+    .from('.ld-h1 .ch', { y: 90, rotateX: -55, autoAlpha: 0, duration: 0.9,
+                          stagger: 0.07, transformOrigin: '50% 100%' }, '-=0.35')
+    .from('.ld-sub', { y: 26, autoAlpha: 0, duration: 0.8 }, '-=0.5')
+    .from('.ld-hero-ctas > *', { y: 22, autoAlpha: 0, duration: 0.6, stagger: 0.1 }, '-=0.5')
+    .from('.ld-hero-signin', { autoAlpha: 0, duration: 0.6 }, '-=0.3')
+    .from('.ld-hero-scroll', { autoAlpha: 0, duration: 0.8 }, '-=0.2')
+    .from('.ld-nav', { y: -28, autoAlpha: 0, duration: 0.7 }, 0.15);
+}
+
+// scroll choreography: frame tilt-in, section reveals, count-ups
+function _cinemaScroll() {
+  const frame = document.querySelector('.ld-frame');
+  if (frame) {
+    gsap.fromTo(frame,
+      { rotateX: 14, y: 90, autoAlpha: 0, transformPerspective: 1200 },
+      { rotateX: 0, y: 0, autoAlpha: 1, ease: 'none',
+        scrollTrigger: { trigger: '.ld-shot', start: 'top 92%', end: 'top 38%', scrub: 0.6 } });
+    // pointer parallax on the frame (desktop only)
+    if (window.matchMedia('(hover:hover)').matches) {
+      const shot = document.querySelector('.ld-shot');
+      shot.addEventListener('mousemove', e => {
+        const r = shot.getBoundingClientRect();
+        const dx = (e.clientX - r.left) / r.width - 0.5;
+        const dy = (e.clientY - r.top) / r.height - 0.5;
+        gsap.to(frame, { rotateY: dx * 5, rotateX: -dy * 4, duration: 0.6, ease: 'power2.out' });
+      });
+      shot.addEventListener('mouseleave', () =>
+        gsap.to(frame, { rotateX: 0, rotateY: 0, duration: 0.8, ease: 'power3.out' }));
+    }
+  }
+  document.querySelectorAll('.ld-reveal').forEach(el => {
+    el.classList.add('in');                      // neutralize CSS fallback
+    if (el.classList.contains('ld-shot')) return; // frame has its own scrub
+    gsap.from(el.children.length > 1 ? el.children : el, {
+      y: 36, autoAlpha: 0, duration: 0.9, ease: 'power3.out', stagger: 0.09,
+      scrollTrigger: { trigger: el, start: 'top 86%' },
+    });
+  });
+  gsap.utils.toArray('.ld-count').forEach(el => {
+    const to = parseInt(el.dataset.to, 10) || 0;
+    const o = { v: 0 };
+    gsap.to(o, { v: to, duration: 1.6, ease: 'power2.out',
+      onUpdate: () => { el.textContent = Math.round(o.v); },
+      scrollTrigger: { trigger: el, start: 'top 88%' } });
+  });
+  gsap.from('.ld-footer-mark', { yPercent: 40, autoAlpha: 0, ease: 'none',
+    scrollTrigger: { trigger: '.ld-footer', start: 'top 100%', end: 'bottom 100%', scrub: 0.5 } });
+}
+
+// the particle ocean: chaos resolving into flowing ledger lines
+function _cinemaOcean() {
+  const host = document.getElementById('ld-canvas');
+  if (!host || _ldThree) return;
+  const W = () => host.clientWidth, H = () => host.clientHeight;
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x050f1c, 0.0042);
+  const cam = new THREE.PerspectiveCamera(58, W() / H(), 1, 600);
+  cam.position.set(0, 26, 92);
+  cam.lookAt(0, -4, 0);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setSize(W(), H());
+  host.appendChild(renderer.domElement);
+
+  const COLS = 150, ROWS = 54, SEP = 2.6, N = COLS * ROWS;
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  const cBase = new THREE.Color(0x1d4f80), cTeal = new THREE.Color(0x14b8a6),
+        cGold = new THREE.Color(0xd9a21b);
+  let p = 0;
+  for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
+    pos[p]     = (x - COLS / 2) * SEP;
+    pos[p + 1] = 0;
+    pos[p + 2] = (z - ROWS / 2) * SEP;
+    const r = Math.random();
+    const c = r < 0.05 ? cGold : (r < 0.10 ? cTeal : cBase);
+    col[p] = c.r; col[p + 1] = c.g; col[p + 2] = c.b;
+    p += 3;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({
+    size: 1.5, vertexColors: true, transparent: true, opacity: 0.8,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  scene.add(new THREE.Points(geo, mat));
+
+  let mx = 0, my = 0;
+  if (window.matchMedia('(hover:hover)').matches) {
+    document.getElementById('demo-landing').addEventListener('mousemove', e => {
+      mx = (e.clientX / window.innerWidth - 0.5);
+      my = (e.clientY / window.innerHeight - 0.5);
+    }, { passive: true });
+  }
+  const onResize = () => { cam.aspect = W() / H(); cam.updateProjectionMatrix(); renderer.setSize(W(), H()); };
+  window.addEventListener('resize', onResize);
+
+  const arr = geo.attributes.position.array;
+  let t = 0, raf = 0;
+  const tick = () => {
+    raf = requestAnimationFrame(tick);
+    if (!_ldActive || document.hidden) return;     // pause: no work while hidden
+    t += 0.012;
+    let i = 0;
+    for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) {
+      arr[i * 3 + 1] = Math.sin(x * 0.22 + t) * 1.7 + Math.cos(z * 0.18 + t * 0.7) * 1.7;
+      i++;
+    }
+    geo.attributes.position.needsUpdate = true;
+    cam.position.x += (mx * 14 - cam.position.x) * 0.04;
+    cam.position.y += (26 - my * 8 - cam.position.y) * 0.04;
+    cam.lookAt(0, -4, 0);
+    renderer.render(scene, cam);
+  };
+  tick();
+  _ldThree = { dispose() { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize);
+                           renderer.dispose(); geo.dispose(); mat.dispose(); } };
+}
+
+// the product mock quietly "works": rows flash as the AI categorizes them
+function _cinemaMockLoop() {
+  const rows = [...document.querySelectorAll('.ld-mock-table .ld-mock-row:not(.h)')];
+  if (!rows.length) return;
+  let i = 0;
+  setInterval(() => {
+    if (!_ldActive || document.hidden) return;
+    const row = rows[i % rows.length]; i++;
+    row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+    const pill = row.querySelector('.ld-conf');
+    if (pill && pill.classList.contains('md')) {
+      pill.classList.remove('pop'); void pill.offsetWidth;
+      const wasReview = pill.textContent === 'review';
+      pill.textContent = wasReview ? '0.91 approved' : 'review';
+      pill.classList.toggle('hi', wasReview); pill.classList.toggle('md', !wasReview);
+      pill.classList.add('pop');
+    }
+  }, 2600);
+}
+
+// magnetic gold buttons (desktop)
+function _cinemaMagnetic() {
+  if (!window.matchMedia('(hover:hover)').matches) return;
+  document.querySelectorAll('.demo-landing .ld-btn-gold').forEach(btn => {
+    btn.addEventListener('mousemove', e => {
+      const r = btn.getBoundingClientRect();
+      gsap.to(btn, { x: (e.clientX - r.left - r.width / 2) * 0.18,
+                     y: (e.clientY - r.top - r.height / 2) * 0.3,
+                     duration: 0.4, ease: 'power2.out' });
+    });
+    btn.addEventListener('mouseleave', () =>
+      gsap.to(btn, { x: 0, y: 0, duration: 0.5, ease: 'elastic.out(1, 0.45)' }));
+  });
+}
+
+// landing CTAs adapt to auth: signed-in visitors get straight-through access
+function syncLandingAuthState() {
+  const authed = !!getToken();
+  const navP = document.getElementById('ld-nav-primary');
+  const navS = document.getElementById('ld-nav-signin');
+  const heroB = document.getElementById('ld-hero-secondary');
+  const heroS = document.getElementById('ld-hero-signin');
+  if (navP) { navP.textContent = authed ? 'Open dashboard →' : 'Try the demo';
+              navP.onclick = authed ? hideDemoLanding : startInteractiveDemo; }
+  if (navS) navS.style.display = authed ? 'none' : '';
+  if (heroB) { heroB.textContent = authed ? 'Open your dashboard →' : 'Explore the live demo →';
+               heroB.onclick = authed ? hideDemoLanding : startInteractiveDemo; }
+  if (heroS) heroS.style.display = authed ? 'none' : '';
 }
 
 function ldScroll(where) {
@@ -2899,6 +3127,7 @@ async function submitSignup(e) {
   }
 }
 function hideDemoLanding() {
+  _ldActive = false;                            // pauses the WebGL + mock loops
   document.getElementById('demo-landing')?.classList.add('hidden');
   document.body.style.overflow = '';
 }
@@ -3056,13 +3285,16 @@ if (!getToken()) {
   applyUserIdentity('Demo User', '');
   const _demoInpInit = document.getElementById('settings-display-name');
   if (_demoInpInit) _demoInpInit.value = '';
-  showDemoLanding();
 } else {
   // Live mode: all data from BQ — null period triggers auto-detect of most recent period
   fetchLiveForAccount(null, null);
   loadUnposted();
   fetchLiveHST(currentPeriod);
 }
+// THE FRONT DOOR: every visit lands here — signed-out visitors get demo/sign-up
+// CTAs; signed-in users get a one-click "Open dashboard →" (their live data is
+// already loading behind the curtain). Identical to the post-sign-out state.
+showDemoLanding();
 // Snapshot synthetic report rows so demo mode can restore them after a live session
 window._rptActivityMockHTML = document.getElementById('rpt-client-activity-tbody')?.innerHTML || '';
 // Close video modal on Escape
@@ -3071,6 +3303,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVideoTo
 
 <!-- ══════════════════════════════════════ LANDING PAGE -->
 <div id="demo-landing" class="demo-landing hidden">
+  <div class="ld-canvas" id="ld-canvas" aria-hidden="true"></div>
+  <div class="ld-grain" aria-hidden="true"></div>
   <div class="ld-glow g1"></div><div class="ld-glow g2"></div><div class="ld-glow g3"></div>
 
   <nav class="ld-nav" id="ld-nav">
@@ -3085,8 +3319,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVideoTo
       <a onclick="ldScroll('access')">Early access</a>
     </div>
     <div class="ld-nav-cta">
-      <button class="ld-btn ld-btn-ghost" onclick="hideDemoLanding(); showSignIn()">Sign in</button>
-      <button class="ld-btn ld-btn-gold" onclick="startInteractiveDemo()">Try the demo</button>
+      <button class="ld-btn ld-btn-ghost" id="ld-nav-signin" onclick="hideDemoLanding(); showSignIn()">Sign in</button>
+      <button class="ld-btn ld-btn-gold" id="ld-nav-primary" onclick="startInteractiveDemo()">Try the demo</button>
     </div>
   </nav>
 
@@ -3101,9 +3335,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVideoTo
     </p>
     <div class="ld-hero-ctas">
       <button class="ld-btn ld-btn-gold ld-btn-lg" onclick="openVideoTour()">▶&nbsp; Watch the tour</button>
-      <button class="ld-btn ld-btn-ghost ld-btn-lg" onclick="startInteractiveDemo()">Explore the live demo →</button>
+      <button class="ld-btn ld-btn-ghost ld-btn-lg" id="ld-hero-secondary" onclick="startInteractiveDemo()">Explore the live demo →</button>
     </div>
-    <a class="ld-hero-signin" role="button" onclick="hideDemoLanding(); showSignIn()">Already have access? Sign in →</a>
+    <a class="ld-hero-signin" role="button" id="ld-hero-signin" onclick="hideDemoLanding(); showSignIn()">Already have access? Sign in →</a>
+    <a class="ld-hero-scroll" role="button" onclick="ldScroll('how')" aria-label="Scroll to how it works">
+      <span>Scroll</span><span class="line"></span>
+    </a>
   </header>
 
   <div class="ld-shot ld-reveal">
@@ -3128,10 +3365,17 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVideoTo
     </div>
   </div>
 
+  <div class="ld-marquee" aria-hidden="true">
+    <div class="ld-marquee-track">
+      <span>RBC <b>·</b> TD <b>·</b> BMO <b>·</b> CIBC <b>·</b> Scotiabank <b>·</b> Desjardins <b>·</b> National Bank <b>·</b> Sage 50 <b>·</b> QuickBooks soon <b>·</b>&nbsp;</span>
+      <span>RBC <b>·</b> TD <b>·</b> BMO <b>·</b> CIBC <b>·</b> Scotiabank <b>·</b> Desjardins <b>·</b> National Bank <b>·</b> Sage 50 <b>·</b> QuickBooks soon <b>·</b>&nbsp;</span>
+    </div>
+  </div>
+
   <div class="ld-trust ld-reveal">
-    <div><b>125+</b><span>Canadian businesses</span></div>
-    <div><b>7</b><span>banks auto-parsed</span></div>
-    <div><b>100%</b><span>human-approved entries</span></div>
+    <div><b><span class="ld-count" data-to="125">0</span>+</b><span>Canadian businesses</span></div>
+    <div><b class="ld-count" data-to="7">0</b><span>banks auto-parsed</span></div>
+    <div><b><span class="ld-count" data-to="100">0</span>%</b><span>human-approved entries</span></div>
     <div><b>CRA</b><span>defensible audit trail</span></div>
   </div>
 
@@ -3205,6 +3449,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeVideoTo
   </section>
 
   <footer class="ld-footer">
+    <div class="ld-footer-mark" aria-hidden="true">AcumenAI</div>
     <div class="copy">© 2026 Orchelix · AcumenAI — Accounting OS for Canadian SMBs</div>
     <nav>
       <a href="https://www.orchelix.com" target="_blank" rel="noopener">orchelix.com</a>
