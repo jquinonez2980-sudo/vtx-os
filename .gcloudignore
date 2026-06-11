@@ -27,6 +27,8 @@ sage50_bridge/
 
 # Node / Orchelix site is a separate repo — never in this context
 node_modules/
+# Next.js landing deploys to Vercel, not Cloud Run
+landing/
 
 # Docs / large binaries not needed at runtime
 *.pdf

@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+body {
+  @apply bg-ink-950 text-mist antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: rgba(217, 162, 27, 0.35);
+  color: #fff;
+}
+
+/* filmic grain */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  width: 200%;
+  height: 200%;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+}
+@media (prefers-reduced-motion: no-preference) {
+  .grain::after { animation: grain-shift 0.9s steps(3) infinite; }
+  @keyframes grain-shift {
+    0% { transform: translate(0, 0); }
+    33% { transform: translate(-2%, 1%); }
+    66% { transform: translate(1%, -2%); }
+    100% { transform: translate(0, 0); }
+  }
+}
+
+/* gold CTA sheen sweep */
+.btn-sheen { position: relative; overflow: hidden; }
+.btn-sheen::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -80%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: skewX(-20deg);
+}
+.btn-sheen:hover::after { left: 130%; transition: left 650ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* marquee */
+@media (prefers-reduced-motion: no-preference) {
+  .marquee-track { animation: marquee-x 30s linear infinite; }
+  @keyframes marquee-x { to { transform: translateX(-50%); } }
+}
+
+/* a11y focus */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #dbaf34;
+  outline-offset: 3px;
+  border-radius: 6px;
+}

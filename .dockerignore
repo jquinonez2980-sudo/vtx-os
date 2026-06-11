@@ -17,6 +17,9 @@ config/project.env
 .claude/
 .claudeignore
 
+# Next.js landing (deploys to Vercel, not this container)
+landing/
+
 # Dev environment
 .venv/
 __pycache__/
