@@ -537,9 +537,11 @@ def ops_onboard_client(
     gl_bank_account: str,
     sender_email: str = "",
     year_end_month: int = 12,
+    sai_folder: str = "",
+    industry: str = "",
     _user: dict = Depends(require_user),
 ) -> dict[str, Any]:
-    """Append a new client row to R:\\bookkeeping\\client_accounts.csv."""
+    """Append a new client row to the registry CSV (full 9-column width)."""
     import json as _json
     import re as _re
 
@@ -554,7 +556,7 @@ def ops_onboard_client(
         meta = _json.loads(_meta_path.read_text(encoding="utf-8")) if _meta_path.exists() else {}
         meta[mask] = {
             "company_name": company_name,
-            "industry": "",
+            "industry": industry,
             "bank": bank,
         }
         _meta_path.write_text(_json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -566,18 +568,32 @@ def ops_onboard_client(
     registry_path = pathlib.Path(
         _os.environ.get("VTX_CLIENT_REGISTRY", r"R:\bookkeeping\client_accounts.csv")
     )
+    # Full 9-column row — matches core/client_registry.py's schema. A short row
+    # silently zeroes year_end_month and breaks sai_path() (incident class:
+    # Theotherapy folder mismatch).
+    row_csv = (f"{account_no},{company_name},{client_id},{gl_bank_account},"
+               f"{bank},{sender_email},{year_end_month},"
+               f"{sai_folder or company_name},sage50")
+    header = ("account_no,r_folder,client_id,gl_bank_account,bank,"
+              "sender_email,year_end_month,sai_folder,platform\n")
     try:
-        existing = registry_path.read_text(encoding="utf-8") if registry_path.exists() else "account_no,r_folder,client_id,gl_bank_account,bank,sender_email\n"
+        existing = registry_path.read_text(encoding="utf-8") if registry_path.exists() else header
         if f",{client_id}," in existing:
             raise HTTPException(status_code=409, detail=f"client_id '{client_id}' already exists in registry")
-        row = f"\n{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email}"
         with open(registry_path, "a", encoding="utf-8") as fh:
-            fh.write(row)
-        return {"ok": True, "client_id": client_id, "message": f"Client '{company_name}' added to registry"}
+            fh.write("\n" + row_csv)
+        return {
+            "ok": True,
+            "client_id": client_id,
+            "row": row_csv,
+            "message": (f"Client '{company_name}' added to the container registry. "
+                        f"IMPORTANT: also append this row to "
+                        f"R:\\bookkeeping\\client_accounts.csv (and commit "
+                        f"config/client_accounts.csv) or it is lost on redeploy."),
+        }
     except HTTPException:
         raise
     except Exception as exc:
-        row_csv = f"{account_no},{company_name},{client_id},{gl_bank_account},{bank},{sender_email}"
         return {
             "ok": True,
             "manual_registry": True,

@@ -1127,8 +1127,9 @@
       </div>
       <div class="form-row">
         <div>
-          <label class="field-label">Bank Account Number</label>
-          <input class="input" id="ob-account-no" type="text" placeholder="e.g. 1234567">
+          <label class="field-label">Bank Account Number *</label>
+          <input class="input" id="ob-account-no" type="text" required placeholder="e.g. 1234567">
+          <div class="field-hint">Routes incoming statements to this client</div>
         </div>
         <div>
           <label class="field-label">Bank Name *</label>
@@ -1142,15 +1143,23 @@
       </div>
       <div class="form-row">
         <div>
-          <label class="field-label">Bank GL Account Number</label>
-          <input class="input" id="ob-gl-bank" type="text" placeholder="e.g. 1020">
-          <div class="field-hint">Sage 50 GL account for bank transactions</div>
+          <label class="field-label">Bank GL Account Number *</label>
+          <input class="input" id="ob-gl-bank" type="text" required placeholder="e.g. 1060">
+          <div class="field-hint">From THIS client's Sage chart of accounts — posting uses it</div>
         </div>
+        <div>
+          <label class="field-label">Sage Company Folder *</label>
+          <input class="input" id="ob-sai-folder" type="text" required placeholder="e.g. Smith Holdings Inc">
+          <div class="field-hint">Folder under R:\ containing the .SAI files</div>
+        </div>
+      </div>
+      <div class="form-row">
         <div>
           <label class="field-label">Statement Email(s)</label>
           <input class="input" id="ob-sender-email" type="text" placeholder="e.g. statements@client.com">
           <div class="field-hint">Gmail will be watched for these senders</div>
         </div>
+        <div></div>
       </div>
       <div class="form-row cols-3">
         <div>
@@ -1164,19 +1173,16 @@
         </div>
         <div>
           <label class="field-label">GST/HST Number</label>
-          <input class="input" type="text" placeholder="e.g. 123456789 RT0001">
+          <input class="input" type="text" placeholder="e.g. 123456789 RT0001" disabled>
+          <div class="field-hint">Not stored yet — coming with client tax profiles</div>
         </div>
         <div>
           <label class="field-label">Filing Frequency</label>
-          <select class="select-ctrl">
+          <select class="select-ctrl" disabled>
             <option selected>Monthly</option><option>Quarterly</option><option>Annually</option>
           </select>
+          <div class="field-hint">Not stored yet</div>
         </div>
-      </div>
-      <div style="margin-bottom:14px">
-        <label class="field-label">Drop Folder Path (optional)</label>
-        <input class="input" type="text" placeholder="e.g. Google Drive: /Clients/Maple Ridge/Statements">
-        <div class="field-hint">Alternative to Gmail watcher — for emailed statement files</div>
       </div>
     </form>
     <div class="modal-foot" style="flex-wrap:wrap;gap:8px">
@@ -2708,13 +2714,20 @@ async function submitOnboarding(e) {
   const companyName  = (document.getElementById('ob-company-name')?.value || '').trim();
   const accountNo    = (document.getElementById('ob-account-no')?.value || '').trim();
   const glBankAcct   = (document.getElementById('ob-gl-bank')?.value || '').trim();
+  const saiFolder    = (document.getElementById('ob-sai-folder')?.value || '').trim();
   const senderEmail  = (document.getElementById('ob-sender-email')?.value || '').trim();
+  const industry     = document.getElementById('ob-industry')?.value || '';
   const bank         = document.getElementById('ob-bank')?.value || '';
   const MONTH_NUM    = {January:1,February:2,March:3,April:4,May:5,June:6,July:7,August:8,September:9,October:10,November:11,December:12};
   const yearEndMonth = MONTH_NUM[document.getElementById('ob-year-end')?.value] || 12;
 
+  // No quiet defaults: a blank GL silently becoming "1060" is the exact
+  // incident class behind the Theotherapy mis-posting.
   if (!companyName) { showToast('Company name is required', 'warning'); return; }
   if (!bank)        { showToast('Select a bank', 'warning'); return; }
+  if (!accountNo)   { showToast('Bank account number is required — it routes statements', 'warning'); return; }
+  if (!glBankAcct)  { showToast('Bank GL account is required — posting uses it', 'warning'); return; }
+  if (!saiFolder)   { showToast('Sage company folder is required — posting needs the .SAI path', 'warning'); return; }
 
   const clientId = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '').slice(0, 30);
 
@@ -2726,16 +2739,19 @@ async function submitOnboarding(e) {
     const qs = new URLSearchParams({
       company_name: companyName,
       client_id:    clientId,
-      account_no:   accountNo || '000000',
+      account_no:   accountNo,
       bank,
-      gl_bank_account: glBankAcct || '1060',
+      gl_bank_account: glBankAcct,
       sender_email: senderEmail,
       year_end_month: String(yearEndMonth),
+      sai_folder: saiFolder,
+      industry,
     });
     const result = await apiFetch('/api/ops/onboard-client?' + qs.toString(), { method: 'POST' });
     closeOnboarding();
     if (result.ok) {
-      showToast('Client "' + companyName + '" onboarded — run Gmail Watcher to activate', 'success');
+      showToast('Client "' + companyName + '" onboarded — copy the registry row from the response into R:\\bookkeeping\\client_accounts.csv', 'success');
+      if (result.row) console.log('Registry row to mirror:', result.row);
       fetchLiveForAccount(null, null);
     } else {
       showToast(result.error || 'Onboarding error', 'warning');
@@ -2752,7 +2768,8 @@ function showToast(msg, type) {
   const stack = document.getElementById('toast-stack');
   const t = document.createElement('div');
   t.className = 'toast ' + type;
-  t.innerHTML = '<span class="t-icon"></span><span>' + msg + '</span>';
+  // escHtml: msg often carries server error text / user input — never raw HTML
+  t.innerHTML = '<span class="t-icon"></span><span>' + escHtml(msg) + '</span>';
   stack.appendChild(t);
   setTimeout(() => { t.classList.add('fade-out'); setTimeout(() => t.remove(), 280); }, 3800);
 }
