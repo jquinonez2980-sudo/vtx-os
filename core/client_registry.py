@@ -8,7 +8,7 @@ against a maintained CSV registry that lives with the client data on the R: driv
     R:\\bookkeeping\\client_accounts.csv
 
     account_no,r_folder,client_id,gl_bank_account,bank,sender_email,year_end_month,sai_folder,platform,platform_ref
-    1890-5315443,Concetta Enterprises Inc,concetta,1060,TD,veromendez87@hotmail.com,4,,sage50,
+    0000-1234567,Example Client Inc,example,1060,TD,owner@example.com,3,,sage50,
 
 - account_no may be written with or without separators; it is normalized to
   digits and keyed on the FULL number (not last-4) to avoid collisions across
@@ -33,12 +33,70 @@ from __future__ import annotations
 import csv
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 DEFAULT_REGISTRY_CSV = Path(r"R:\bookkeeping\client_accounts.csv")
 
 _REQUIRED_COLUMNS = {"account_no", "r_folder", "client_id", "gl_bank_account"}
+
+
+class _RegistryRow(BaseModel):
+    """Row-level validation for client_accounts.csv. Invalid rows warn + skip."""
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    account_no:      str
+    r_folder:        str = ""
+    client_id:       str = ""
+    gl_bank_account: str = ""
+    bank:            str = ""
+    sender_email:    str = ""
+    year_end_month:  int = 0
+    sai_folder:      str = ""
+    platform:        str = "sage50"
+    platform_ref:    str = ""
+
+    @field_validator("account_no")
+    @classmethod
+    def _normalize(cls, v: str) -> str:
+        digits = re.sub(r"\D", "", v or "")
+        if not digits:
+            raise ValueError("account_no contains no digits")
+        return digits
+
+    @field_validator("year_end_month", mode="before")
+    @classmethod
+    def _year_end(cls, v) -> int:
+        try:
+            n = int(v or 0)
+        except (ValueError, TypeError):
+            return 0
+        if not (0 <= n <= 12):
+            raise ValueError(f"year_end_month must be 0–12, got {n!r}")
+        return n
+
+    @field_validator("platform", mode="before")
+    @classmethod
+    def _platform(cls, v) -> str:
+        norm = (v or "sage50").strip().lower()
+        if norm not in ("sage50", "qbo"):
+            print(
+                f"[client_registry] unknown platform {norm!r}, defaulting to 'sage50'",
+                file=sys.stderr,
+            )
+            return "sage50"
+        return norm
+
+    @field_validator("gl_bank_account")
+    @classmethod
+    def _gl_acct(cls, v: str) -> str:
+        if v and not re.fullmatch(r"\d{3,6}", v):
+            raise ValueError(f"gl_bank_account must be 3–6 digits, got {v!r}")
+        return v
+
 
 # A candidate account token in OCR text: a run of digits allowing a single
 # space or dash between consecutive digits (e.g. "1890-5315443", "3632 8961-555").
@@ -125,24 +183,25 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
                 f"{csv_path} is missing required column(s): {', '.join(sorted(missing))}"
             )
         for row in reader:
-            acct = normalize_account(row.get("account_no", ""))
-            if not acct:
-                continue
             try:
-                year_end_month = int(row.get("year_end_month") or 0)
-            except (ValueError, TypeError):
-                year_end_month = 0
-            registry[acct] = ClientConfig(
-                account_no=acct,
-                r_folder=(row.get("r_folder") or "").strip(),
-                client_id=(row.get("client_id") or "").strip(),
-                gl_bank_account=(row.get("gl_bank_account") or "").strip(),
-                bank=(row.get("bank") or "").strip(),
-                sender_email=(row.get("sender_email") or "").strip(),
-                year_end_month=year_end_month,
-                sai_folder=(row.get("sai_folder") or "").strip(),
-                platform=(row.get("platform") or "sage50").strip().lower(),
-                platform_ref=(row.get("platform_ref") or "").strip(),
+                validated = _RegistryRow.model_validate(dict(row))
+            except ValidationError as exc:
+                print(
+                    f"[client_registry] skipping bad row {dict(row)}: {exc}",
+                    file=sys.stderr,
+                )
+                continue
+            registry[validated.account_no] = ClientConfig(
+                account_no=validated.account_no,
+                r_folder=validated.r_folder,
+                client_id=validated.client_id,
+                gl_bank_account=validated.gl_bank_account,
+                bank=validated.bank,
+                sender_email=validated.sender_email,
+                year_end_month=validated.year_end_month,
+                sai_folder=validated.sai_folder,
+                platform=validated.platform,
+                platform_ref=validated.platform_ref,
             )
     return registry
 
@@ -197,3 +256,27 @@ def resolve(text: str, registry: dict[str, ClientConfig]) -> ClientConfig | None
     """Resolve OCR statement text to a ClientConfig, or None when no match."""
     acct = find_account_in_text(text, registry)
     return registry.get(acct) if acct else None
+
+
+def append_registry_row(cfg: ClientConfig, path: "Path | str | None" = None) -> None:
+    """Append one row to the registry CSV using csv.writer (handles quoted commas).
+
+    Creates the file with a header row when the file does not yet exist.
+    Prefer this over hand-editing to avoid quoting issues with client names
+    that contain commas (e.g. "Smith, Johnson & Associates").
+    """
+    csv_path = Path(path) if path is not None else registry_path()
+    write_header = not csv_path.exists()
+    with open(csv_path, "a", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.writer(fh)
+        if write_header:
+            writer.writerow([
+                "account_no", "r_folder", "client_id", "gl_bank_account",
+                "bank", "sender_email", "year_end_month", "sai_folder",
+                "platform", "platform_ref",
+            ])
+        writer.writerow([
+            cfg.account_no, cfg.r_folder, cfg.client_id, cfg.gl_bank_account,
+            cfg.bank, cfg.sender_email, cfg.year_end_month or "",
+            cfg.sai_folder, cfg.platform, cfg.platform_ref,
+        ])

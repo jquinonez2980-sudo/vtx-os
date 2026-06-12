@@ -412,8 +412,8 @@ Add a new row at the bottom with these columns:
 
 ```
 account_no,r_folder,client_id,gl_bank_account,bank,sender_email,year_end_month
-1890-5315443,Concetta Enterprises Inc,concetta,1060,TD,veromendez87@hotmail.com,4
-1234-5678901,Arrow Mechanical Services Inc,arrow-mechanical,1060,TD,owner@arrowmech.com,12
+0000-1234567,Example Client Inc,example,1060,TD,owner@example.com,3
+0000-9876543,Arrow Mechanical Services Inc,arrow-mechanical,1060,TD,owner@arrowmech.com,12
 ```
 
 Save the file.
