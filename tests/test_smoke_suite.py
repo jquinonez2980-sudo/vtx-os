@@ -13,6 +13,7 @@ of the parent session's env.
 """
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
@@ -39,6 +40,46 @@ _DATA_DEPS: dict[str, list[str]] = {
     "p2_1_adk_smoke.py":                ["data/test-client/concetta-dec2025-gl.csv",
                                          "data/test-client/dec-2025-bank-extracted.csv"],
 }
+
+
+def test_mock_bq_client_query_contract() -> None:
+    """MockBQClient.query must only name kwargs that bigquery.Client.query also accepts.
+
+    This is the M0.1 contract-fidelity guard from the 2026-06-12 audit (C1/T1):
+    the original mock accepted job_configuration= while the real client only has
+    job_config=, so every approve/reject/escalate DML silently no-oped in
+    production while all 19 offline suites stayed green.
+
+    If this test fails after a library upgrade, update the mock to match the new
+    real signature — never update the real call to match the mock.
+    """
+    from google.cloud import bigquery
+    from tests.p1_7_e2e import MockBQClient
+
+    real_params = set(inspect.signature(bigquery.Client.query).parameters.keys())
+
+    # The mock names its first positional arg 'sql'; the real client names it
+    # 'query'. They're positionally equivalent — exclude from the kwarg check.
+    POSITIONAL_ALIASES = {"self", "sql"}
+
+    mock_kwargs = {
+        name
+        for name, p in inspect.signature(MockBQClient.query).parameters.items()
+        if name not in POSITIONAL_ALIASES
+        and p.kind not in (
+            inspect.Parameter.VAR_POSITIONAL,  # *args
+            inspect.Parameter.VAR_KEYWORD,     # **_ / **kwargs
+        )
+    }
+
+    extra = mock_kwargs - real_params
+    assert not extra, (
+        f"MockBQClient.query names {sorted(extra)} which bigquery.Client.query "
+        f"(v{bigquery.__version__}) does not have. "
+        f"The mock is encoding a contract the installed client doesn't honour — "
+        f"the suite would pass while production breaks. "
+        f"Real params: {sorted(real_params - {'self'})}"
+    )
 
 
 def _offline_scripts() -> list[Path]:
