@@ -219,12 +219,21 @@ namespace Sage50Bridge
 
     class SilentAlert : SDKAlert
     {
+        // Last alert text — surfaced in per-entry error messages so a failed
+        // post says WHY (incident 2026-06-10: errors said only "Post() returned
+        // false" while the real story was in discarded alert messages).
+        public static string LastMessage = "";
+
         public override AlertResult AskAlert(SimplyMessage m) { Log(m); return AlertResult.YES; }
         public override AlertResult AskSaveAlert()            { return AlertResult.NO; }
         public override AlertResult YNCAlert(SimplyMessage m) { Log(m); return AlertResult.NO; }
         public override void StopAlert(SimplyMessage m)       { Log(m); }
         public override bool StopAlertNotShow(SimplyMessage m){ Log(m); return false; }
-        private static void Log(SimplyMessage m) { Console.Error.WriteLine("SDK alert: " + m.Message); }
+        private static void Log(SimplyMessage m)
+        {
+            LastMessage = m.Message;
+            Console.Error.WriteLine("SDK alert: " + m.Message);
+        }
     }
 
     // ── Data export ───────────────────────────────────────────────────────────────
@@ -563,6 +572,17 @@ namespace Sage50Bridge
                 row["date"]    = entry.date ?? "";
                 row["comment"] = entry.comment ?? "";
 
+                // EVIDENCE-BASED success detection (incident 2026-06-10): Post()
+                // can return false / GetLastJournalNumber() can throw even though
+                // the journal WAS committed — trusting the boolean caused 301
+                // posted entries to be reported as failures, and the operator
+                // retry double-posted them. The journal number advancing is the
+                // only report we trust.
+                string before = SafeLastJournalNo(gj);
+                bool sdkSaysPosted = false;
+                string postError = null;
+                SilentAlert.LastMessage = "";
+
                 try
                 {
                     gj.SetJournalDate(IsoToSageDate(entry.date));
@@ -579,25 +599,36 @@ namespace Sage50Bridge
                         gj.SetComment(Truncate(line.comment ?? "", 39), n);
                     }
 
-                    if (gj.Post())
-                    {
-                        row["posted"]     = true;
-                        row["journal_no"] = gj.GetLastJournalNumber();
-                        postedCount++;
-                    }
-                    else
-                    {
-                        row["posted"] = false;
-                        row["error"]  = "Post() returned false — check Sage 50 for validation errors";
-                        Console.Error.WriteLine("Post() false: " + entry.date + " " + entry.comment);
-                        try { gj.Undo(); } catch { }
-                    }
+                    sdkSaysPosted = gj.Post();
                 }
                 catch (Exception ex)
                 {
+                    postError = ex.Message;
+                }
+
+                string after = SafeLastJournalNo(gj);
+                bool actuallyPosted = after != "" && after != before;
+
+                if (actuallyPosted)
+                {
+                    row["posted"]     = true;
+                    row["journal_no"] = after;
+                    postedCount++;
+                    if (!sdkSaysPosted)
+                        Console.Error.WriteLine(
+                            "NOTE: SDK reported failure but journal " + after +
+                            " was created (" + entry.date + " " + entry.comment +
+                            ") — counting as POSTED. Alert was: " + SilentAlert.LastMessage);
+                }
+                else
+                {
+                    string why = postError ?? "Post() returned false";
+                    if (SilentAlert.LastMessage != "")
+                        why += " | SDK alert: " + SilentAlert.LastMessage;
                     row["posted"] = false;
-                    row["error"]  = ex.Message;
-                    Console.Error.WriteLine("Exception posting " + entry.date + ": " + ex.Message);
+                    row["error"]  = why;
+                    Console.Error.WriteLine("Post failed: " + entry.date + " " +
+                                            entry.comment + " — " + why);
                     try { gj.Undo(); } catch { }
                 }
 
@@ -613,6 +644,14 @@ namespace Sage50Bridge
                 errors  = entries.Count - postedCount,
                 results = results,
             });
+        }
+
+        // Last posted journal number, or "" when unavailable. Never throws —
+        // this is the ground-truth probe around every Post() call.
+        private static string SafeLastJournalNo(GeneralJournal gj)
+        {
+            try { return gj.GetLastJournalNumber().ToString(); }
+            catch { return ""; }
         }
 
         // "YYYY-MM-DD" → "MM/DD/YYYY"

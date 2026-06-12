@@ -940,6 +940,23 @@ distinct signature accent: amber/gold** (`gold-500 #D9A21B`, `-600 #B7791F`, `-5
   Status: code complete, offline-tested; awaiting Intuit app creation (portal account ✓)
   → sandbox end-to-end test.
 
+## SESSION 23 CHANGES  [2026-06-10 — theotherapy GL incident RESOLVED]
+- **Root cause found:** `post_journal_entries` falsely reported "94 posted / 301 errors"
+  while ALL 395 reversals had landed in Sage → the retry double-posted (REV sets A+B,
+  790 journals). Operator's manual fix (jids 1473-1961) was built around set A.
+  → open task: fix bridge result reporting (this false report caused everything).
+- **Second discovery:** the bridge GL report signs dAmount by BALANCE IMPACT (credit-
+  natural accounts 2xxx/3xxx/4xxx report credits as positive), NOT debit/credit.
+  `_map_gl`'s naive split is wrong for credit-natural accounts (dedupe keys unaffected —
+  they use abs). Decoded properly in `_undo_reversals.py:true_dr_cr()`.
+- **Repair executed:** `scripts/_undo_reversals.py --jid-from 1962 --jid-to 2356` posted
+  395 UND: mirrors neutralizing REV set B exactly; 1060 verified at $14,003.11 closing.
+  Backups skip transient .SAJ files (process.pid) — fixed in script + Sage50Connector.
+- **Also:** alert policies live w/ email channel (after gcloud filter-quoting cleanup);
+  DASHBOARD_API_KEY CRLF bug fixed (PS pipe corrupted the secret → 401s) + key rotated;
+  queues archived for concetta/theotherapy (clean slate); 'Opening balance' statement
+  lines were booked as deposits in the original batch — parser data-quality task.
+
 ## NEXT STEPS
 Next priorities (ordered — from Session 21 audit):
   1. ⚠ Add `sai_folder` column to `R:\bookkeeping\client_accounts.csv` (the LIVE registry —

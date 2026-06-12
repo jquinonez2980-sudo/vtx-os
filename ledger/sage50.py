@@ -77,7 +77,11 @@ class Sage50Connector(LedgerConnector):
         bdir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self.sai, bdir / self.sai.name)
         if saj.is_dir():
-            shutil.copytree(saj, bdir / saj.name)
+            # transient connection-manager files (not part of the books) can
+            # vanish mid-copy — never let them fail a backup
+            shutil.copytree(saj, bdir / saj.name, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns(
+                                "process.pid", "*.lock", "*.tmp", "~*"))
         return bdir
 
     def post(self, entries: list[LedgerEntry]) -> PostResult:

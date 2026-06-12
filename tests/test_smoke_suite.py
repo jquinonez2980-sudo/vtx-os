@@ -25,6 +25,22 @@ _TESTS = _ROOT / "tests"
 _ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
 
 
+# Real-client fixtures live in gitignored data/test-client/ and exist only on
+# the bookkeeping machine. On CI those scripts are SKIPPED (not failed) — the
+# data must never be committed. Keep this map in sync when adding data-driven
+# smoke tests; the long-term fix is synthetic fixtures (audit task M3).
+_DATA_DEPS: dict[str, list[str]] = {
+    "p1_7_e2e.py":                      ["data/test-client/dec-2025-bank.csv"],
+    "concetta_categorization_smoke.py": ["data/test-client/dec-2025-bank-extracted.csv"],
+    "client_routing_smoke.py":          ["data/test-client/bank_statment_january_2026-ocr.txt"],
+    "p2_2_a2a_smoke.py":                ["data/test-client/concetta-dec2025-gl.csv",
+                                         "data/test-client/dec-2025-bank-extracted.csv"],
+    "journal_entry_smoke.py":           ["data/test-client/dec-2025-bank-extracted.csv"],
+    "p2_1_adk_smoke.py":                ["data/test-client/concetta-dec2025-gl.csv",
+                                         "data/test-client/dec-2025-bank-extracted.csv"],
+}
+
+
 def _offline_scripts() -> list[Path]:
     scripts = sorted(_TESTS.glob("*_smoke.py"))
     e2e = _TESTS / "p1_7_e2e.py"
@@ -36,6 +52,10 @@ def _offline_scripts() -> list[Path]:
 
 @pytest.mark.parametrize("script", _offline_scripts(), ids=lambda p: p.name)
 def test_offline_smoke(script: Path) -> None:
+    missing = [d for d in _DATA_DEPS.get(script.name, ())
+               if not (_ROOT / d).exists()]
+    if missing:
+        pytest.skip(f"requires gitignored client data: {', '.join(missing)}")
     r = subprocess.run(
         [sys.executable, str(script)],
         cwd=_ROOT, env=_ENV, capture_output=True, text=True,

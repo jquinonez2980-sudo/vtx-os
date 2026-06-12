@@ -29,7 +29,9 @@ from jwt import PyJWKClient
 AUTH_JWKS_URL    = os.environ.get("AUTH_JWKS_URL", "")
 AUTH_ISSUER      = os.environ.get("AUTH_ISSUER", "")
 AUTH_AUDIENCE    = os.environ.get("AUTH_AUDIENCE", "")
-DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "")
+# .strip(): secret values written via shell pipes can carry a trailing CRLF —
+# that must never break the timing-safe compare.
+DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "").strip()
 
 
 @lru_cache(maxsize=1)

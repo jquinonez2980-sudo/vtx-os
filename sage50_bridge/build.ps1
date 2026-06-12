@@ -11,9 +11,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Anchor everything on this script's folder so it works from any CWD.
+$here   = $PSScriptRoot
 $csc    = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $sdkDir = "C:\Program Files (x86)\Sage 50 Accounting SDK\SDK"
-$out    = "Sage50Bridge.exe"
+$out    = Join-Path $here "Sage50Bridge.exe"
+$src    = Join-Path $here "Program.cs"
 
 if (-not (Test-Path $csc)) {
     throw "csc.exe not found at: $csc"
@@ -42,7 +45,7 @@ $compileArgs = @(
     "/platform:x86",
     "/optimize+",
     "/nologo"
-) + $refArgs + @("Program.cs")
+) + $refArgs + @($src)
 
 & $csc @compileArgs
 
@@ -50,8 +53,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed (exit $LASTEXITCODE)"
 }
 
-# Copy Newtonsoft.Json.dll so the exe can find it at runtime.
-Copy-Item "$sdkDir\Newtonsoft.Json.dll" "." -Force
+# Copy Newtonsoft.Json.dll next to the exe so it resolves at runtime.
+Copy-Item "$sdkDir\Newtonsoft.Json.dll" $here -Force
 
 Write-Host "Build succeeded: $out" -ForegroundColor Green
 Write-Host ""
