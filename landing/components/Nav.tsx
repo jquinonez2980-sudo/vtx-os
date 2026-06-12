@@ -23,13 +23,9 @@ export default function Nav() {
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
     >
-      <a href="#top" className="flex items-center gap-3">
-        <span className="block h-8 w-8 rounded-lg bg-gradient-to-br from-gold-500 to-gold-600
-                         shadow-[0_0_18px_rgba(217,162,27,0.35)]" />
-        <span className="leading-tight">
-          <b className="block text-[17px] font-bold tracking-tight text-white">AcumenAI</b>
-          <span className="block text-[11px] text-mist/40">by Orchelix</span>
-        </span>
+      <a href="#top">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/acumenai-logo.png" alt="AcumenAI" className="h-10 w-auto" />
       </a>
 
       <div className="ml-3 hidden gap-6 md:flex">
