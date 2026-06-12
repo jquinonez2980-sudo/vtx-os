@@ -14,7 +14,7 @@ Required payload keys:
 Optional payload keys:
     account_no        (str)  — masked account number (default "xxxx")
     threshold         (float)— confidence threshold for auto-approve (default 0.80)
-    suspense_account  (str)  — GL code for needs_review transactions (default "5900")
+    suspense_account  (str)  — GL code for needs_review transactions (default SUSPENSE_DEFAULT)
     sai_file          (str)  — Sage 50 .SAI file path (falls back to Secret Manager)
     sage50_user       (str)  — Sage 50 user (falls back to env/Secret Manager)
     sage50_password   (str)  — Sage 50 password (falls back to env/Secret Manager)
@@ -38,6 +38,7 @@ from datetime import date
 from decimal import Decimal
 
 from agents.base import AgentBase, TaskRequest, TaskResult, TaskType
+from ledger.build import SUSPENSE_DEFAULT
 from models.banking import CategorizedTransaction, JournalEntryDraft, JournalEntryLine
 from models.base import EventStatus
 
@@ -56,7 +57,7 @@ class JournalEntryAgent(AgentBase):
         client_id         = payload.get("client_id", "").lower()
         account_no        = payload.get("account_no", "xxxx")
         threshold         = float(payload.get("threshold", 0.80))
-        suspense_account  = payload.get("suspense_account", "5900")
+        suspense_account  = payload.get("suspense_account", SUSPENSE_DEFAULT)
         dry_run           = bool(payload.get("dry_run", False))
 
         # Client-specific GL code → Sage 50 lId mapping (applied only at bridge post time)

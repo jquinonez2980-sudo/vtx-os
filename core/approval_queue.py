@@ -121,7 +121,7 @@ def get_by_period(period: str) -> list[ApprovalItem]:
     job_cfg = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("period", "STRING", period)]
     )
-    rows = list(_bq().query(query, job_configuration=job_cfg).result())
+    rows = list(_bq().query(query, job_config=job_cfg).result())
     return [ApprovalItem.model_validate(dict(row.items())) for row in rows]
 
 
@@ -156,7 +156,7 @@ def _update_status(
         params.append(bigquery.ScalarQueryParameter("final_gl_no", "STRING", final_gl_no))
 
     try:
-        job = _bq().query(query, job_configuration=bigquery.QueryJobConfig(query_parameters=params))
+        job = _bq().query(query, job_config=bigquery.QueryJobConfig(query_parameters=params))
         job.result()
         return True
     except Exception as exc:

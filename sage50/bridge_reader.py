@@ -264,7 +264,10 @@ def _map_vendor(r: dict) -> Vendor:
 #                 dAmount, szComment
 # Fallback result (union fails): current-year only, then tjentact flat (no txnDate)
 #
-# dAmount sign convention: positive = debit, negative = credit
+# dAmount sign convention: BALANCE-IMPACT sign, not debit/credit polarity.
+# Debit-normal accounts (1xxx asset, 5xxx/6xxx expense): positive = debit, negative = credit.
+# Credit-normal accounts (2xxx liability, 3xxx equity, 4xxx revenue): positive = credit, negative = debit.
+# _map_gl/fetch_trial_balance/fetch_tax_summary must decode via account nature — see M1.2.
 # ---------------------------------------------------------------------------
 
 def fetch_gl_transactions(

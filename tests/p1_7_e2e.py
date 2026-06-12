@@ -103,17 +103,17 @@ class MockBQClient:
                     self._queue_rows[qid] = dict(row)
         return []  # no errors
 
-    def query(self, sql: str, job_configuration=None, **_):
+    def query(self, sql: str, job_config=None, **_):
         mock_job = MagicMock()
         mock_job.result.return_value = []
 
         if "UPDATE" in sql and "approval_queue" in sql:
             # approve() / reject() / escalate() DML -- check UPDATE first because
             # the UPDATE's WHERE clause also contains "PENDING"
-            if job_configuration is not None:
+            if job_config is not None:
                 try:
                     params = {p.name: p.value
-                              for p in job_configuration.query_parameters}
+                              for p in job_config.query_parameters}
                     qid = params.get("queue_id", "")
                     if qid in self._queue_rows:
                         self._queue_rows[qid]["status"] = params.get("status", "")

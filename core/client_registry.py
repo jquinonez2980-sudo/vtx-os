@@ -7,8 +7,8 @@ against a maintained CSV registry that lives with the client data on the R: driv
 
     R:\\bookkeeping\\client_accounts.csv
 
-    account_no,r_folder,client_id,gl_bank_account,bank,sender_email
-    1890-5315443,Concetta Enterprises Inc,concetta,1060,TD,veromendez87@hotmail.com
+    account_no,r_folder,client_id,gl_bank_account,bank,sender_email,year_end_month,sai_folder,platform,platform_ref
+    1890-5315443,Concetta Enterprises Inc,concetta,1060,TD,veromendez87@hotmail.com,4,,sage50,
 
 - account_no may be written with or without separators; it is normalized to
   digits and keyed on the FULL number (not last-4) to avoid collisions across
@@ -113,7 +113,7 @@ def load_registry(path: Path | str | None = None) -> dict[str, ClientConfig]:
         raise FileNotFoundError(
             f"Client registry not found: {csv_path}\n"
             f"Create it with columns: account_no,r_folder,client_id,"
-            f"gl_bank_account,bank,sender_email"
+            f"gl_bank_account,bank,sender_email,year_end_month,sai_folder,platform,platform_ref"
         )
 
     registry: dict[str, ClientConfig] = {}

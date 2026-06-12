@@ -532,8 +532,8 @@ def gmail_auth_status(_user: dict = Depends(require_user)) -> dict[str, Any]:
     """Check whether Gmail OAuth credentials are stored in Secret Manager or locally."""
     # Check Secret Manager first
     try:
-        from core.secrets import get_secret
-        val = get_secret("vtx-gmail-oauth-credentials")
+        from core.secrets import get
+        val = get("vtx-gmail-oauth-credentials")
         if val and len(val) > 10:
             return {"connected": True, "source": "secret_manager"}
     except Exception:
