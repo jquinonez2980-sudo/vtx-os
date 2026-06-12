@@ -24,6 +24,14 @@ param(
     [string]$CorsOrigin = "https://orchelix.com,https://www.orchelix.com"
 )
 
+# Anchor on the repo root regardless of the caller's CWD. On 2026-06-11 this
+# script was invoked from landing/ and `gcloud run deploy --source=.` shipped
+# the Next.js app over the API (via buildpacks!), 503ing production. Never again.
+Set-Location (Join-Path $PSScriptRoot "..")
+if (-not (Test-Path ".\Dockerfile") -or -not (Test-Path ".\dashboard\app.py")) {
+    throw "Deploy aborted: repo root not found (Dockerfile/dashboard missing at $(Get-Location))"
+}
+
 $PROJECT  = "vtx-accounting-os-prod"
 $REGION   = "northamerica-northeast2"
 $SERVICE  = "acumenai-api"
@@ -83,7 +91,12 @@ if (-not $?) {
 }
 if ($ApiKey) {
     Write-Host "     Adding new secret version (key rotation)"
-    $ApiKey | gcloud secrets versions add $SECRET_NAME --data-file=- --project=$PROJECT --quiet
+    # NEVER pipe the key: PowerShell appends CRLF, which corrupts the secret
+    # (token compare fails -> every sign-in 401s). Write byte-exact via temp file.
+    $tmp = New-TemporaryFile
+    [System.IO.File]::WriteAllText($tmp.FullName, $ApiKey)
+    gcloud secrets versions add $SECRET_NAME --data-file=$tmp.FullName --project=$PROJECT --quiet
+    Remove-Item $tmp.FullName -Force
 }
 
 # ---------------------------------------------------------------------------
