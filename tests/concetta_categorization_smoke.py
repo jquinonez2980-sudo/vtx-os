@@ -16,7 +16,14 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
+
+def _find(name: str) -> str:
+    """Return real client data path if present; fall back to tracked synthetic fixture."""
+    real = _ROOT / "data" / "test-client" / name
+    return str(real if real.exists() else _ROOT / "tests" / "fixtures" / name)
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +46,7 @@ from agents.base import TaskRequest, TaskType
 from agents.bookkeeping import BookkeepingAgent
 from sage50.bank_parser import parse_csv
 
-CSV_PATH   = "data/test-client/dec-2025-bank-extracted.csv"
+CSV_PATH   = _find("dec-2025-bank-extracted.csv")
 ACCOUNT_NO = "xxxx5443"
 PERIOD     = "2025-12"
 GL_BANK    = "1060"

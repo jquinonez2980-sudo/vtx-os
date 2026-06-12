@@ -47,7 +47,14 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-CSV_PATH = ROOT / "data" / "test-client" / "dec-2025-bank.csv"
+
+def _find(name: str) -> Path:
+    """Return real client data if present; fall back to tracked synthetic fixture."""
+    real = ROOT / "data" / "test-client" / name
+    return real if real.exists() else ROOT / "tests" / "fixtures" / name
+
+
+CSV_PATH = _find("dec-2025-bank.csv")
 OUT_DIR  = ROOT / "data" / "test-client"
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,13 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
+
+def _find(name: str) -> str:
+    real = _ROOT / "data" / "test-client" / name
+    return str(real if real.exists() else _ROOT / "tests" / "fixtures" / name)
 
 from agents.base import TaskRequest, TaskType
 from agents.journal_entry import JournalEntryAgent, _build_drafts, _draft_to_bridge
@@ -108,7 +114,7 @@ check("Bridge line 1 account_id == '4100'",       line_cr["account_id"] == "4100
 # ---------------------------------------------------------------------------
 # Test 5 — dry_run via JournalEntryAgent (no bridge call)
 # ---------------------------------------------------------------------------
-BANK_CSV = str(Path(__file__).parents[1] / "data/test-client/dec-2025-bank-extracted.csv")
+BANK_CSV = _find("dec-2025-bank-extracted.csv")
 
 agent = JournalEntryAgent()
 req = TaskRequest(

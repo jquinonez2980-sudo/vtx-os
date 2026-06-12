@@ -26,7 +26,13 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
+
+def _find(name: str) -> str:
+    real = _ROOT / "data" / "test-client" / name
+    return str(real if real.exists() else _ROOT / "tests" / "fixtures" / name)
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +77,8 @@ EXPECTED_AGENT_IDS = {
     "reconcile-gl-agent",
 }
 
-GL_CSV   = "data/test-client/concetta-dec2025-gl.csv"
-BANK_CSV = "data/test-client/dec-2025-bank-extracted.csv"
+GL_CSV   = _find("concetta-dec2025-gl.csv")
+BANK_CSV = _find("dec-2025-bank-extracted.csv")
 
 
 def _reconcile_payload() -> dict:
