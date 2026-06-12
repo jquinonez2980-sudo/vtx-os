@@ -21,6 +21,7 @@ class ApprovalStatus(str, Enum):
     REJECTED  = "REJECTED"
     ESCALATED = "ESCALATED"
     POSTED    = "POSTED"     # set by the local posting agent after Sage 50 accepts the entry
+    ARCHIVED  = "ARCHIVED"  # soft-archived; prior status preserved in review_note (M1.5)
 
 
 class ApprovalItem(BaseModel):

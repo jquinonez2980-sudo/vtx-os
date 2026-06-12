@@ -279,6 +279,11 @@ def fetch_gl_transactions(
     password: str | None = None,
 ) -> list[GLTransaction]:
     sai, usr, pwd = _get_creds(sai_file, user, password)
+    coa_rows = _run_bridge(sai, usr, pwd, "coa")
+    coa_funcs: dict[str, str] = {
+        _str(r.get("lId")): (_str_or_none(r.get("cFunc")) or "").upper()
+        for r in coa_rows
+    }
     rows = _run_bridge(sai, usr, pwd, "gl", start_date, end_date)
 
     # If we requested a date range and got nothing, Sage 50 may have stored the entries
@@ -296,13 +301,12 @@ def fetch_gl_transactions(
         )
         rows = _run_bridge(sai, usr, pwd, "gl", None, None)
 
-    return [_map_gl(r) for r in rows]
+    return [_map_gl(r, coa_funcs) for r in rows]
 
 
-def _map_gl(r: dict) -> GLTransaction:
+def _map_gl(r: dict, coa_funcs: "dict[str, str] | None" = None) -> GLTransaction:
     amount = _dec(r.get("dAmount"))
-    debit  = amount if amount >= 0 else Decimal("0")
-    credit = -amount if amount < 0 else Decimal("0")
+    debit, credit = decode_dr_cr(_str(r.get("lAcctId")), amount, coa_funcs or {})
     # szComment = line-level note (often empty); hdrComment = entry-level description
     description = _str(r.get("szComment") or r.get("hdrComment") or "")
     return GLTransaction.model_validate({
@@ -478,6 +482,10 @@ _REVENUE_FUNCS  = frozenset("RIO")
 _EXPENSE_FUNCS  = frozenset("XY")
 _POSTING_FUNCS  = frozenset("ABCLMEFRIOXY")
 
+# Credit-normal cFuncs: positive dAmount = credit (not debit).
+# Liability (L/M), Equity (E/F), Revenue (R/I/O) — see _COA_TYPE for full mapping.
+_CREDIT_NORMAL_FUNCS = frozenset("LMEFRIO")
+
 
 def _lId_to_display(lid: str) -> str:
     """Convert 8-digit Sage 50 lId to 4-digit display code: '11000000' → '1100'."""
@@ -488,6 +496,28 @@ def _lId_to_display(lid: str) -> str:
         return lid
     except (ValueError, TypeError):
         return lid
+
+
+def decode_dr_cr(
+    lAcctId: str,
+    dAmount: Decimal,
+    coa_funcs: "dict[str, str]",
+) -> "tuple[Decimal, Decimal]":
+    """Convert balance-impact dAmount to (debit, credit) using account nature.
+
+    Debit-normal  (cFunc A/B/C/X/Y): positive = debit,  negative = credit.
+    Credit-normal (cFunc L/M/E/F/R/I/O): positive = credit, negative = debit.
+    Unknown lAcctId: falls back to debit-normal (safe — assets/expenses are majority).
+    Returns (debit, credit) both >= 0.
+    """
+    func = (coa_funcs.get(lAcctId) or "").upper()
+    if func in _CREDIT_NORMAL_FUNCS:
+        credit = dAmount if dAmount >= 0 else Decimal("0")
+        debit  = -dAmount if dAmount < 0 else Decimal("0")
+    else:
+        debit  = dAmount if dAmount >= 0 else Decimal("0")
+        credit = -dAmount if dAmount < 0 else Decimal("0")
+    return debit, credit
 
 
 def fetch_trial_balance(
@@ -527,6 +557,8 @@ def fetch_trial_balance(
         if lid in coa_map:
             net_by_acct[lid] += _dec(r.get("dAmount"))
 
+    coa_funcs = {lid: func for lid, (_, _, func) in coa_map.items()}
+
     lines = []
     for lid, net in net_by_acct.items():
         if net == Decimal("0"):
@@ -534,10 +566,7 @@ def fetch_trial_balance(
         display, name, _ = coa_map[lid]
         if not _NUMERIC_DISPLAY_RE.match(display):
             continue
-        if net > 0:
-            debit, credit = net, Decimal("0")
-        else:
-            debit, credit = Decimal("0"), abs(net)
+        debit, credit = decode_dr_cr(lid, net, coa_funcs)
         lines.append(TBLine(account_no=display, description=name, debit=debit, credit=credit))
 
     lines.sort(key=lambda l: l.account_no)
@@ -642,9 +671,9 @@ def fetch_tax_summary(
     for r in gl_rows:
         lid    = _str(r.get("lAcctId"))
         amount = _dec(r.get("dAmount"))
-        if lid in revenue_ids and amount < 0:
-            taxable_sales += abs(amount)
-        elif lid in expense_ids and amount > 0:
+        if lid in revenue_ids and amount > 0:       # revenue credit = positive dAmount
+            taxable_sales += amount
+        elif lid in expense_ids and amount > 0:    # expense debit = positive dAmount
             taxable_purchases += amount
 
     tax_collected = (taxable_sales     * rate).quantize(Decimal("0.01"))
