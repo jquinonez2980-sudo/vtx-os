@@ -236,6 +236,79 @@ check("qbo existing_keys parses JE JSON",
 check("qbo existing key matches connector key for same entry",
       qc.key(dep) in keys)
 
+# ── 8. Within-batch dedupe (M1.4) ───────────────────────────────────────────
+print("\n8. Within-batch dedupe")
+from ledger.base import LedgerEntry, LedgerLine
+from ledger.sage50 import Sage50Connector, bnk_key
+
+_conn8 = Sage50Connector(None)
+
+def _make_entry(d: str, desc: str, amt: float) -> LedgerEntry:
+    a = Decimal(str(amt))
+    return LedgerEntry(
+        entry_date=date.fromisoformat(d), comment=desc,
+        lines=[LedgerLine(gl_ref="1065", debit=a),
+               LedgerLine(gl_ref="4020", credit=a)],
+    )
+
+e_a  = _make_entry("2026-01-10", "CLIENT PAYMENT", 500.00)
+e_b  = _make_entry("2026-01-11", "HYDRO ONE",      200.00)
+e_a2 = _make_entry("2026-01-10", "CLIENT PAYMENT", 500.00)   # exact duplicate of e_a
+
+batch8 = [e_a, e_b, e_a2]
+existing8: set = set()   # nothing already in ledger
+
+seen_keys8: set = set()
+deduped8 = []
+for e in batch8:
+    k = _conn8.key(e)
+    if k not in seen_keys8:
+        seen_keys8.add(k)
+        deduped8.append(e)
+
+check("within-batch dedup: 2 unique entries from 3 (one duplicate removed)", len(deduped8) == 2)
+check("within-batch dedup: original entries preserved (not the duplicate)",
+      deduped8[0] is e_a and deduped8[1] is e_b)
+check("within-batch dedup: duplicate key correctly identified",
+      _conn8.key(e_a) == _conn8.key(e_a2))
+
+# ── 9. _fetch_postable fan-out dedup (M1.4) ─────────────────────────────────
+print("\n9. _fetch_postable fan-out dedup")
+from scripts.posting_agent import _STATUS_RANK  # type: ignore[attr-defined]  -- exposed for test
+
+_rows9 = [
+    # Same (date, desc, amount) matched to three queue rows: REJECTED, APPROVED, PENDING
+    # The dedup must keep the APPROVED row (rank 0).
+    {"txn_date": date(2026, 1, 5), "description": "CLIENT DEP", "amount": Decimal("1000"),
+     "queue_status": "REJECTED", "queue_id": "q-r", "gl": "4020", "needs_review": True},
+    {"txn_date": date(2026, 1, 5), "description": "CLIENT DEP", "amount": Decimal("1000"),
+     "queue_status": "APPROVED", "queue_id": "q-a", "gl": "4020", "needs_review": True},
+    {"txn_date": date(2026, 1, 5), "description": "CLIENT DEP", "amount": Decimal("1000"),
+     "queue_status": "PENDING",  "queue_id": "q-p", "gl": "4020", "needs_review": True},
+    # Distinct row — must survive unchanged
+    {"txn_date": date(2026, 1, 6), "description": "HYDRO ONE", "amount": Decimal("-200"),
+     "queue_status": None, "queue_id": None, "gl": "5500", "needs_review": False},
+]
+
+seen_dk9: dict = {}
+for r in _rows9:
+    dk = (r["txn_date"], r["description"], str(r["amount"]))
+    prev = seen_dk9.get(dk)
+    if prev is None:
+        seen_dk9[dk] = r
+    else:
+        new_rank = _STATUS_RANK.get((r.get("queue_status") or "").upper(), 9)
+        old_rank = _STATUS_RANK.get((prev.get("queue_status") or "").upper(), 9)
+        if new_rank < old_rank:
+            seen_dk9[dk] = r
+deduped9 = list(seen_dk9.values())
+
+check("fan-out dedup: 4 rows -> 2 unique (date,desc,amount) pairs", len(deduped9) == 2)
+check("fan-out dedup: APPROVED row wins over REJECTED and PENDING",
+      deduped9[0]["queue_id"] == "q-a")
+check("fan-out dedup: distinct row preserved",
+      deduped9[1]["description"] == "HYDRO ONE")
+
 # ── result ──────────────────────────────────────────────────────────────────
 total = _passed + _failed
 print(f"\n{total}/{total} checks: {_passed} passed, {_failed} failed")

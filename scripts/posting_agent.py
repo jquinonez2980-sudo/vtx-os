@@ -39,6 +39,11 @@ sys.path.insert(0, str(_ROOT))
 
 PROJECT = "vtx-accounting-os-prod"
 
+# Posting-priority rank for fan-out dedup: lower = higher priority.
+_STATUS_RANK: dict[str, int] = {
+    "APPROVED": 0, "POSTED": 1, "PENDING": 2, "ESCALATED": 3, "REJECTED": 4,
+}
+
 
 def _post_decision(needs_review: bool, queue_status: str | None) -> bool:
     """The approval contract, in one place:
@@ -80,6 +85,23 @@ def _fetch_postable(account_no: str, period: str) -> list[dict]:
         ORDER BY t.txn_date, t.description
     """
     rows = list(c.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params)).result())
+
+    # Deduplicate fan-out from the LEFT JOIN: one categorized row can match multiple
+    # queue rows (re-submission, duplicate import, same date+desc+amount).
+    # Keep the row with the highest posting priority for each (date, desc, amount).
+    seen_dk: dict[tuple, dict] = {}
+    for r in rows:
+        dk = (r.txn_date, r.description, str(r.amount))
+        prev = seen_dk.get(dk)
+        if prev is None:
+            seen_dk[dk] = dict(r)
+        else:
+            new_rank = _STATUS_RANK.get((r.queue_status or "").upper(), 9)
+            old_rank = _STATUS_RANK.get((prev.get("queue_status") or "").upper(), 9)
+            if new_rank < old_rank:
+                seen_dk[dk] = dict(r)
+    rows = list(seen_dk.values())
+
     postable = []
     held = defaultdict(int)
     for r in rows:
@@ -163,6 +185,20 @@ def _process_request(req, dry_run: bool, sage_user: str) -> tuple[int, int, int,
         total_skipped += skipped
         if skipped:
             print(f"  [{year}] {skipped} already in ledger — skipped")
+
+        # Within-batch dedupe: two entries with identical conn.key() would cause
+        # the first to post and the second to hit a Sage duplicate error.
+        seen_keys: set = set()
+        deduped = []
+        for e in batch:
+            k = conn.key(e)
+            if k not in seen_keys:
+                seen_keys.add(k)
+                deduped.append(e)
+            else:
+                print(f"  [{year}] within-batch duplicate removed: {k}")
+        batch = deduped
+
         if not batch:
             continue
         if dry_run:
