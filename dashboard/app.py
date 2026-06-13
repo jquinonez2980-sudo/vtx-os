@@ -430,57 +430,6 @@ def ops_post_requests(
     return list_recent(limit=limit, account_no=account_no)
 
 
-@app.post("/api/ops/post-entries")
-def ops_post_entries(
-    client_id: str | None = None,
-    account_no: str | None = None,
-    gl_bank: str | None = None,
-    _user: dict = Depends(require_user),
-) -> dict[str, Any]:
-    """Dry-run _post_je.py for the given client. Always dry-run — real posting requires local Sage 50 SAI access."""
-    import subprocess
-    import sys
-    _ROOT = pathlib.Path(__file__).parent.parent
-    # Resolve account_no + gl_bank from registry when not supplied directly
-    if (not account_no or not gl_bank) and client_id:
-        try:
-            from core.client_registry import load_registry
-            reg = load_registry()
-            configs = list(reg.values()) if isinstance(reg, dict) else list(reg)
-            cfg = next(
-                (c for c in configs if getattr(c, "client_id", None) == client_id), None
-            )
-            if cfg:
-                account_no = account_no or getattr(cfg, "account_masked", None) or getattr(cfg, "account_no", None)
-                gl_bank = gl_bank or str(getattr(cfg, "gl_bank_account", "") or "")
-        except Exception:
-            pass
-    if not account_no:
-        raise HTTPException(status_code=422, detail="account_no required (or supply client_id to look up from registry)")
-    if not gl_bank:
-        raise HTTPException(status_code=422, detail="gl_bank required (or supply client_id to look up from registry)")
-    args = [
-        sys.executable, str(_ROOT / "scripts" / "_post_je.py"),
-        "--account", account_no,
-        "--gl-bank", gl_bank,
-    ]
-    try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=300,
-            cwd=str(_ROOT), env={**os.environ, "PYTHONUTF8": "1"},
-        )
-        lines = [l for l in (result.stdout + "\n" + result.stderr).splitlines() if l.strip()]
-        return {
-            "ok": result.returncode == 0,
-            "dry_run": True,
-            "note": "Re-run with --commit (and Sage 50 CLOSED) to post for real.",
-            "lines": lines,
-            "code": result.returncode,
-        }
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "dry_run": True, "lines": ["ERROR: Post job timed out after 300s"], "code": -1}
-    except Exception as exc:
-        return {"ok": False, "dry_run": True, "lines": [f"ERROR: {exc}"], "code": -1}
 
 
 @app.post("/api/ops/archive-client/{account_no}")
@@ -562,44 +511,6 @@ def gmail_auth_status(_user: dict = Depends(require_user)) -> dict[str, Any]:
     return {"connected": False, "source": "none",
             "hint": "Run: python scripts/gmail_auth.py — then re-check status"}
 
-
-@app.post("/api/ops/run-hst")
-def ops_run_hst(
-    client: str | None = None,
-    period: str | None = None,
-    _user: dict = Depends(require_user),
-) -> dict[str, Any]:
-    """Trigger PrepareHSTReturnAgent via the orchestrator for a client/period."""
-    import subprocess
-    import sys
-    _ROOT = pathlib.Path(__file__).parent.parent
-    script = _ROOT / "scripts" / "_run_hst.py"
-    if not script.exists():
-        return {
-            "ok": False,
-            "lines": [
-                "HST agent script not found at scripts/_run_hst.py.",
-                "Run locally: python -c \"from agents.prepare_hst_return import PrepareHSTReturnAgent; ...\"",
-                f"Or query BQ directly: SELECT * FROM vtx_accounting.hst_returns WHERE return_period = '{period or 'YYYY-MM'}'",
-            ],
-            "hint": "The HST agent requires Vertex AI + BQ access. Run from the project root.",
-        }
-    args = [sys.executable, str(script)]
-    if client:
-        args += ["--client", client]
-    if period:
-        args += ["--period", period]
-    try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=120,
-            cwd=str(_ROOT), env={**os.environ, "PYTHONUTF8": "1"},
-        )
-        lines = [l for l in (result.stdout + "\n" + result.stderr).splitlines() if l.strip()]
-        return {"ok": result.returncode == 0, "lines": lines, "code": result.returncode}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "lines": ["ERROR: HST agent timed out after 120s"], "code": -1}
-    except Exception as exc:
-        return {"ok": False, "lines": [f"ERROR: {exc}"], "code": -1}
 
 
 @app.post("/api/ops/onboard-client")

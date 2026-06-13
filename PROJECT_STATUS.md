@@ -26,7 +26,7 @@ Next major: QuickBooks Online connector (Sage 50 sunset — see Session 21 in SE
 | M2.1 | `JournalEntryAgent` → `ledger/` connector            | ✅ DONE (S22) | `agents/journal_entry.py`            |
 | M2.2 | Bridge: returncode check + password via env var      | ✅ DONE       | `sage50/bridge_reader.py`, `sage50_bridge/Program.cs` |
 | M2.3 | Split PROJECT_STATUS.md                              | ✅ DONE       | `PROJECT_STATUS.md`, `docs/SESSION_LOG.md` |
-| M2.4 | Disable dead ops endpoints on Cloud Run              | ⬜ TODO       | `dashboard/app.py`                   |
+| M2.4 | Disable dead ops endpoints on Cloud Run              | ✅ DONE       | `dashboard/app.py`                   |
 
 **Note:** `sage50_bridge/Sage50Bridge.exe` must be rebuilt after M2.2 (`sage50_bridge/build.ps1`).
 
@@ -42,9 +42,7 @@ Next major: QuickBooks Online connector (Sage 50 sunset — see Session 21 in SE
 4. Start `scripts/posting_agent.py --watch`; first dashboard-driven post
 5. Sage 50: Start New Year → 2026.SAI for theotherapy (unblocks 23 Jan-2026 entries)
 
-**Remaining Fable 5 audit:**
-6. M2.4 — Disable dead ops endpoints (`/api/ops/archive-client`, `/api/ops/restore-client`
-   from public surface if not needed, OR add rate-limiting + audit log calls to them)
+**Fable 5 audit: all M0–M2 milestones complete.**
 
 **QBO track:**
 7. Register Intuit developer app (portal account created ✓; approval needed)
