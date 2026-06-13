@@ -488,15 +488,20 @@ def ops_archive_client(
     account_no: str,
     _user: dict = Depends(require_user),
 ) -> dict[str, Any]:
-    """Mark all BQ approval_queue rows for an account as ARCHIVED."""
+    """Archive pending/approved rows for an account. POSTED rows are skipped —
+    they have already been written to Sage 50 and must not re-enter the queue."""
     from google.cloud import bigquery as _bqmod
     from core.bq_loader import PROJECT, _bq
     bq = _bq()
     sql = f"""
         UPDATE `{PROJECT}.vtx_accounting.approval_queue`
-        SET status = 'ARCHIVED'
+        SET status = 'ARCHIVED',
+            review_note = CONCAT(
+                '[archived:', status, ']',
+                IF(IFNULL(review_note, '') != '', CONCAT(' ', review_note), '')
+            )
         WHERE account_no = @account_no
-          AND status != 'ARCHIVED'
+          AND status NOT IN ('ARCHIVED', 'POSTED')
     """
     job = bq.query(sql, job_config=_bqmod.QueryJobConfig(
         query_parameters=[_bqmod.ScalarQueryParameter("account_no", "STRING", account_no)]
@@ -510,21 +515,33 @@ def ops_restore_client(
     account_no: str,
     _user: dict = Depends(require_user),
 ) -> dict[str, Any]:
-    """Restore ARCHIVED rows to PENDING for an account."""
+    """Restore ARCHIVED rows, recovering their prior status from review_note.
+    Rows that were POSTED before archival remain ARCHIVED — they cannot re-enter
+    the queue without risking a double-post to Sage 50."""
     from google.cloud import bigquery as _bqmod
     from core.bq_loader import PROJECT, _bq
     bq = _bq()
     sql = f"""
         UPDATE `{PROJECT}.vtx_accounting.approval_queue`
-        SET status = 'PENDING'
+        SET
+            status = COALESCE(
+                NULLIF(REGEXP_EXTRACT(IFNULL(review_note, ''), r'^\[archived:([A-Z]+)\]'), 'POSTED'),
+                'PENDING'
+            ),
+            review_note = NULLIF(
+                TRIM(REGEXP_REPLACE(IFNULL(review_note, ''), r'^\[archived:[A-Z]+\] ?', '')),
+                ''
+            )
         WHERE account_no = @account_no
           AND status = 'ARCHIVED'
+          AND NOT REGEXP_CONTAINS(IFNULL(review_note, ''), r'^\[archived:POSTED\]')
     """
     job = bq.query(sql, job_config=_bqmod.QueryJobConfig(
         query_parameters=[_bqmod.ScalarQueryParameter("account_no", "STRING", account_no)]
     ))
     job.result()
-    return {"ok": True, "account_no": account_no, "rows_restored": job.num_dml_affected_rows}
+    return {"ok": True, "account_no": account_no,
+            "rows_restored": job.num_dml_affected_rows}
 
 
 @app.get("/api/auth/gmail-status")

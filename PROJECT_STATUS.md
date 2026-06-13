@@ -957,6 +957,33 @@ distinct signature accent: amber/gold** (`gold-500 #D9A21B`, `-600 #B7791F`, `-5
   queues archived for concetta/theotherapy (clean slate); 'Opening balance' statement
   lines were booked as deposits in the original batch — parser data-quality task.
 
+## SESSION 24 CHANGES  [2026-06-12/13 — Fable 5 audit M0+M1]
+Fable 5 technical audit treated as spec. Milestone work:
+
+- **M0.1 — approval-queue `job_config=` kwarg fix** (`core/approval_queue.py`): every
+  approve/reject/escalate DML was silently failing due to wrong kwarg. FIXED.
+- **M0.2 — `ApprovalStatus.ARCHIVED` added** (`models/approval.py`): production BQ had
+  `status='ARCHIVED'` rows that caused Pydantic ValidationError on `get_by_period`. FIXED.
+- **M0.3 — `tests/bridge_sign_smoke.py`** (NEW): offline smoke for M1.2 sign-decode.
+  30/30 PASS. Key insight: cFunc "C" = Asset (debit-normal), not Liability.
+- **M1.1 — Live verification of C1 fix**: `get_by_period("2025-12")` returned 357 rows;
+  `job_config=` kwarg confirmed accepted (BQ streaming-buffer error, not kwarg mismatch).
+- **M1.2 — Bridge sign decode** (`sage50/bridge_reader.py`): added `_CREDIT_NORMAL_FUNCS`
+  + `decode_dr_cr(lAcctId, dAmount, coa_funcs)`; updated `_map_gl`, `fetch_trial_balance`,
+  `fetch_tax_summary` to use it. Fixes wrong debit/credit for credit-normal accounts
+  (liability 2xxx, equity 3xxx/4xxx, revenue 4xxx).
+- **M1.3 — Registry hardening** (`core/client_registry.py`): `_RegistryRow` Pydantic
+  validator at load time; invalid rows warn+skip (never crash startup); `append_registry_row()`
+  added for programmatic onboarding. Example row in docstring anonymised.
+- **M1.4 — Double-post prevention** (`scripts/posting_agent.py`): (1) LEFT-JOIN fan-out
+  dedup — keeps highest-priority status per (date,desc,amount); (2) within-batch key dedup
+  with logging. `tests/posting_pipeline_smoke.py` extended (71/71 PASS).
+- **M1.5 — Archive/restore state machine** (`dashboard/app.py`): archive now skips POSTED
+  rows (`status NOT IN ('ARCHIVED','POSTED')`) and encodes prior status in `review_note`
+  as `[archived:STATUS]` prefix; restore recovers prior status via REGEXP_EXTRACT and
+  strips the prefix. POSTED rows remain frozen (WHERE excludes `[archived:POSTED]`).
+  Legacy rows without prefix fall back to PENDING (unchanged behaviour).
+
 ## NEXT STEPS
 Next priorities (ordered — from Session 21 audit):
   1. ⚠ Add `sai_folder` column to `R:\bookkeeping\client_accounts.csv` (the LIVE registry —
