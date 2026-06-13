@@ -88,7 +88,7 @@ def _run_bridge(
         str(_BRIDGE_EXE),
         "--sai", sai_file,
         "--user", user,
-        "--password", password,
+        # Password passed via env var, not CLI arg, to keep it out of process listings.
         "--table", table,
     ]
     if start_date:
@@ -96,12 +96,22 @@ def _run_bridge(
     if end_date:
         cmd += ["--end-date", end_date.isoformat()]
 
+    env = os.environ.copy()
+    env["VTX_BRIDGE_PASSWORD"] = password or ""
+
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=env,
     )
+
+    if result.returncode != 0:
+        err_detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(
+            f"Sage50Bridge exited {result.returncode} for table='{table}'. {err_detail}"
+        )
 
     stdout = result.stdout.strip()
     if not stdout:
@@ -799,11 +809,13 @@ def post_journal_entries(
 
     cmd = [
         str(_BRIDGE_EXE),
-        "--sai",      sai,
-        "--user",     usr,
-        "--password", pwd,
-        "--mode",     "write",
+        "--sai",  sai,
+        "--user", usr,
+        "--mode", "write",
     ]
+
+    write_env = os.environ.copy()
+    write_env["VTX_BRIDGE_PASSWORD"] = pwd or ""
 
     json_input = json.dumps(entries, default=str)
     result = subprocess.run(
@@ -812,6 +824,7 @@ def post_journal_entries(
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=write_env,
     )
 
     stderr = result.stderr.strip()

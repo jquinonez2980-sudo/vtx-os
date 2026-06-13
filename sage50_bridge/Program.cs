@@ -156,6 +156,10 @@ namespace Sage50Bridge
                     case "--mysql-pass": i++; break;
                 }
             }
+            // Password via env var keeps it out of the process command line / audit logs.
+            if (string.IsNullOrEmpty(opts.Password))
+                opts.Password = Environment.GetEnvironmentVariable("VTX_BRIDGE_PASSWORD") ?? "";
+
             bool isWrite = opts.Mode == "write";
             if (string.IsNullOrEmpty(opts.SaiFile) ||
                 (!isWrite && string.IsNullOrEmpty(opts.Table)))
