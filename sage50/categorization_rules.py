@@ -377,6 +377,145 @@ class TheotherapyRuleset:
         return (self.SUSPENSE_GL, "Suspense", Decimal("0"))
 
 
+# ===========================================================================
+# R.L. Electric Inc. — electrical contractor, Ontario
+# Derived from FY2021 full-year General Ledger (2026-06-15).
+# Keywords taken directly from how the prior bookkeeper coded FY2021.
+# Key non-obvious choices vs. default rules:
+#   - Gas stations (ESSO, SHELL, PETRO) → 5700 Travel/Meals, NOT 5150 Auto
+#     (accountant batched fuel with meals — follows actual GL coding)
+#   - Personal items (NETFLIX, AMAZON, PLANET FITNESS, ABM W\D, UBER, E-TFR)
+#     → 2750 Shareholder's Advance with confidence 0 (always needs review)
+#   - TD LOAN → 2625 Bank Loan (recurring monthly payment)
+#   - Revenue is "DEPOSITS" / "DEPOSIT" via D1 source, NOT E-TRANSFER
+# GL codes are the client's real Sage 50 display codes.  Suspense = 5900.
+# ===========================================================================
+
+class RLElectricRuleset:
+    """Client-specific categorization for R.L. Electric Inc.
+
+    Rules apply in priority order; first match wins.
+    Bank-fee keywords run first. Specific payees (Paul Wolf, Weston Electric)
+    run before generic material-supply rules. Shareholder/personal items route
+    to 2750 with confidence 0 so they always enter the review queue.
+    """
+
+    SUSPENSE_GL = 5900
+
+    def __init__(self):
+        self.rules = [
+            self._rule_bank_fees,       # 5200 — BMO fee descriptions from FY2021
+            self._rule_td_loan,         # 2625 — monthly loan payment
+            self._rule_telecom,         # 5600 — Bell / Virgin (FY2021 only carriers)
+            self._rule_payroll_remit,   # 2100 — Receiver General / CRA
+            self._rule_materials,       # 5450 — named electrical suppliers first
+            self._rule_revenue,         # 4050 — DEPOSITS (D1 source)
+            self._rule_meals_gas,       # 5700 — fuel+food coded together per FY2021
+            self._rule_shareholder,     # 2750 — personal items → review queue
+            self._rule_suspense,        # 5900 — fallback
+        ]
+
+    def categorize(self, description: str, amount: Decimal) -> Tuple[int, str, Decimal]:
+        desc = description.upper()
+        for rule in self.rules:
+            result = rule(desc, amount)
+            if result is not None:
+                return result
+        return (self.SUSPENSE_GL, "Suspense", Decimal("0"))
+
+    # -- 5200 Bank Charges & Interest -------------------------------------
+    # Keywords taken from actual FY2021 GL entries on GL 1100 and 5200.
+    # "PERFORMANCE FEE" / "PERFORMANCE PLAN FEE" is BMO's monthly account fee.
+    # "NSF" anchored to word start — "NSF" is a substring of "traNSFer".
+    def _rule_bank_fees(self, desc, amount):
+        for kw in ("PERFORMANCE FEE", "PERFORMANCE PLAN FEE",
+                   "PERFORMANCE AND OVERDRAFT FEE",
+                   "RETURNED ITEM FEE", "INTEREST PAID",
+                   "INTEREST CHARGE", "OVERDRAFT FEE"):
+            if kw in desc:
+                return (5200, "Bank Charges & Interest", Decimal("95"))
+        if " NSF" in desc or desc.startswith("NSF"):
+            return (5200, "Bank Charges & Interest", Decimal("95"))
+        return None
+
+    # -- 2625 Bank Loan ---------------------------------------------------
+    def _rule_td_loan(self, desc, amount):
+        if "TD LOAN" in desc:
+            return (2625, "Bank Loan", Decimal("95"))
+        return None
+
+    # -- 5600 Telephone & Cellular ----------------------------------------
+    # FY2021 GL shows only BELL ONE BILL and VIRGIN; keep broad Bell/Virgin
+    # match to catch minor description variants.
+    def _rule_telecom(self, desc, amount):
+        if "BELL" in desc or "VIRGIN" in desc:
+            return (5600, "Telephone & Cellular", Decimal("95"))
+        return None
+
+    # -- 2100 Employee Tax Deduction (Receiver General remittances) -------
+    def _rule_payroll_remit(self, desc, amount):
+        if "RECEIVER GENERAL" in desc or "RECEIVEUR GENERAL" in desc:
+            return (2100, "Employee Tax Deduction", Decimal("90"))
+        if "CRA" in desc and amount < 0:
+            return (2100, "Employee Tax Deduction", Decimal("80"))
+        return None
+
+    # -- 5450 Materials & Supplies ----------------------------------------
+    # Named electrical suppliers appear in FY2021 GL under 5450.
+    # Home Depot and Rona also confirmed in FY2021.
+    def _rule_materials(self, desc, amount):
+        for kw in ("PAUL WOLF ELECTRIC", "PAUL WOLF ELECTR",
+                   "WESTON ELECTRIC", "WESTON ELECT",
+                   "HUDCO ELECTRIC", "RATEX ELECTRICAL",
+                   "WESTBURNE", "SAM SUPPLY", "JENCO",
+                   "THE HOME DEPOT", "HOME DEPOT",
+                   "RONA"):
+            if kw in desc:
+                return (5450, "Materials & Supplies", Decimal("95"))
+        return None
+
+    # -- 4050 General Revenue ---------------------------------------------
+    # FY2021: revenue entries use description "DEPOSITS" / "DEPOSIT" / "DESPOSITS"
+    # (bookkeeper typo — DESPOSITS contains no substring "DEPOSIT") with source D1.
+    # Match on positive amounts only.
+    def _rule_revenue(self, desc, amount):
+        if amount > 0 and ("DEPOSIT" in desc or "DESPOSIT" in desc):
+            return (4050, "General Revenue", Decimal("90"))
+        return None
+
+    # -- 5700 Travel, Meals & Entertainment -------------------------------
+    # FY2021 GL codes fuel (ESSO, SHELL, PETRO CANADA) to 5700 alongside food —
+    # bookkeeper batched mixed debit-card spending into one line.  Follow that
+    # convention so categorization matches prior-year coding.
+    def _rule_meals_gas(self, desc, amount):
+        for kw in ("TIM HORTON", "MCDONALD", "MCDONALS", "SUBWAY", "PIZZA PIZZA",
+                   "BOSTON PIZZA", "LCBO", "THE BEER STORE", "BEER STORE",
+                   "NOFRILLS", "NO FRILLS", "METRO ", "CENTRA FOOD",
+                   "ESSO", "SHELL", "PETRO CANADA", "PETRO GAS",
+                   "PIONEER", "HUSKY", "ULTRAMAR"):
+            if kw in desc:
+                return (5700, "Travel, Meals & Entertainment", Decimal("85"))
+        return None
+
+    # -- 2750 Shareholder's Advance (personal / owner drawings) -----------
+    # Confidence 0 → always enters review queue with GL 2750 as suggestion.
+    # Reviewer confirms or redirects before posting.
+    def _rule_shareholder(self, desc, amount):
+        for kw in ("NETFLIX", "AMAZON PRIME", "AMAZON MEMBER",
+                   "PLANET FITNESS", "EQUIFAX",
+                   "UBER", "E-TFR", "E-TRF"):
+            if kw in desc:
+                return (2750, "Shareholder's Advance", Decimal("0"))
+        # Cash withdrawals (ABM W\D, W\D, ABC W\D) — always review
+        if "ABM W" in desc or (("W\\D" in desc or "W/D" in desc) and amount < 0):
+            return (2750, "Shareholder's Advance", Decimal("0"))
+        return None
+
+    # -- 5900 Suspense (fallback) -----------------------------------------
+    def _rule_suspense(self, desc, amount):
+        return (self.SUSPENSE_GL, "Suspense", Decimal("0"))
+
+
 # ---------------------------------------------------------------------------
 # Client ruleset registry — BookkeepingAgent selects by client_id substring.
 # ---------------------------------------------------------------------------
@@ -384,6 +523,7 @@ class TheotherapyRuleset:
 _CLIENT_RULESETS: dict[str, type] = {
     "concetta":    ConcettaRuleset,
     "theotherapy": TheotherapyRuleset,
+    "rlelectric":  RLElectricRuleset,
 }
 
 

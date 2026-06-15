@@ -35,12 +35,21 @@ Next major: QuickBooks Online connector (Sage 50 sunset — see Session 21 in SE
 ## NEXT STEPS (ordered)
 
 **Immediate — operational (pre-posting):**
-1. ⚠ Add `sai_folder` column to `R:\bookkeeping\client_accounts.csv` (LIVE registry) —
-   theotherapy rows → `Canadian Federation of theotherapy`
-2. Run `scripts/_fix_gl_bank.py --dry-run` (expect 395+395) then `--commit` (Sage CLOSED)
-3. Run `scripts/setup_alerts.ps1`
-4. Start `scripts/posting_agent.py --watch`; first dashboard-driven post
-5. Sage 50: Start New Year → 2026.SAI for theotherapy (unblocks 23 Jan-2026 entries)
+1. ✅ `sai_folder` column confirmed in `R:\bookkeeping\client_accounts.csv`
+2. ✅ `scripts/_fix_gl_bank.py` dry-run verified (395+395); Sage 50 balances confirmed correct — fix script not needed
+3. ✅ `scripts/setup_alerts.ps1` — policies already existed, channel bound
+4. ✅ `scripts/posting_agent.py --watch` running via Startup folder shortcut (`scripts/start_posting_agent.ps1`); logs to `logs/posting_agent.log`
+5. Sage 50: Start New Year → 2026.SAI for theotherapy (deferred — adjusting entries still pending)
+
+**New client onboarded:**
+- R.L. Electric Inc (`rlelectric`) — BMO xxxx5911, GL 1100, Dec 31 YE
+- Registry row added to `R:\bookkeeping\client_accounts.csv`
+- `RLElectricRuleset` added to `sage50/categorization_rules.py` — rules derived from FY2021 full-year GL
+  (PERFORMANCE FEE→5200, TD LOAN→2625, BELL/VIRGIN→5600, named electrical suppliers→5450,
+   DEPOSITS→4050, fuel+food→5700, personal items→2750 confidence 0, fallback→5900)
+- Smoke test: `tests/rlelectric_categorization_smoke.py` — 65/65 passing
+- `scripts/start_posting_agent.ps1` — posting agent auto-start via Windows Startup folder shortcut
+- Next: process first BMO statement to confirm real description formats
 
 **Fable 5 audit: all M0–M2 milestones complete.**
 
