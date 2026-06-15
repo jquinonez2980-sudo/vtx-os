@@ -19,6 +19,8 @@ Usage:
 from __future__ import annotations
 
 import base64
+import ssl
+import time
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
@@ -120,33 +122,59 @@ class GmailNotifier:
         attachment_id: str,
         filename: str,
         dest_dir: Path,
+        retries: int = 4,
     ) -> Path:
         """Download one Gmail attachment by ID and write it to dest_dir.
 
+        Retries up to *retries* times on transient SSL errors (httplib2 / TLS
+        handshake failures are intermittent with some network configurations).
         Returns the path of the saved file.
         """
-        att = (
-            self._svc()
-            .users()
-            .messages()
-            .attachments()
-            .get(userId="me", messageId=msg_id, id=attachment_id)
-            .execute()
-        )
-        raw = base64.urlsafe_b64decode(att["data"])
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / _safe_filename(filename)
-        dest.write_bytes(raw)
-        return dest
+        delay = 2.0
+        last_exc: Exception | None = None
+        for attempt in range(retries):
+            try:
+                att = (
+                    self._svc()
+                    .users()
+                    .messages()
+                    .attachments()
+                    .get(userId="me", messageId=msg_id, id=attachment_id)
+                    .execute()
+                )
+                raw = base64.urlsafe_b64decode(att["data"])
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / _safe_filename(filename)
+                dest.write_bytes(raw)
+                return dest
+            except (ssl.SSLError, OSError, TimeoutError) as exc:
+                last_exc = exc
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                    delay = min(delay * 2, 30.0)
+                    self._service = None  # force fresh connection next attempt
+        raise last_exc  # type: ignore[misc]
 
-    def mark_read(self, msg_id: str, label_name: str = "vtx-processed") -> None:
+    def mark_read(self, msg_id: str, label_name: str = "vtx-processed", retries: int = 4) -> None:
         """Remove UNREAD label and apply *label_name* (created if absent)."""
         label_id = self._get_or_create_label(label_name)
-        self._svc().users().messages().modify(
-            userId="me",
-            id=msg_id,
-            body={"removeLabelIds": ["UNREAD"], "addLabelIds": [label_id]},
-        ).execute()
+        delay = 2.0
+        last_exc: Exception | None = None
+        for attempt in range(retries):
+            try:
+                self._svc().users().messages().modify(
+                    userId="me",
+                    id=msg_id,
+                    body={"removeLabelIds": ["UNREAD"], "addLabelIds": [label_id]},
+                ).execute()
+                return
+            except (ssl.SSLError, OSError, TimeoutError) as exc:
+                last_exc = exc
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                    delay = min(delay * 2, 30.0)
+                    self._service = None
+        raise last_exc  # type: ignore[misc]
 
     def apply_label(self, msg_id: str, label_name: str) -> None:
         """Apply *label_name* (created if absent) WITHOUT marking the message read.
