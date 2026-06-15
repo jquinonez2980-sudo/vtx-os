@@ -244,12 +244,14 @@ def _process_pdf(
         return {"error": "all extraction paths produced empty text — check PDF quality / DocAI processor"}
 
     # Period: prefer the statement's own closing date (authoritative), then
-    # filename/subject hints, then the email-arrival heuristic as last resort.
+    # subject (human-written, most reliable for scanner-named files like
+    # "Adobe Scan Jun 15, 2026.pdf" whose filename reflects the scan date),
+    # then filename, then the email-arrival heuristic as last resort.
     period = (
         period_override
         or _period_from_text(ext.text)
-        or _period_from_filename(fname)
         or _period_from_subject(subject)
+        or _period_from_filename(fname)
         or _period_from_epoch(epoch_ms)
     )
     print(f"    Period : {period}")
@@ -374,11 +376,11 @@ def _process_csv(
 
     bank = txns[0].bank_code
 
-    # Period: override → filename/subject → email-arrival heuristic
+    # Period: override → subject → filename → email-arrival heuristic
     period = (
         period_override
-        or _period_from_filename(fname)
         or _period_from_subject(subject)
+        or _period_from_filename(fname)
         or _period_from_epoch(epoch_ms)
     )
     print(f"    Period : {period}")

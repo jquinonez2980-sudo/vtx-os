@@ -57,7 +57,7 @@ class _RegistryRow(BaseModel):
     year_end_month:  int = 0
     sai_folder:      str = ""
     platform:        str = "sage50"
-    platform_ref:    str = ""
+    platform_ref:    str | None = ""
 
     @field_validator("account_no")
     @classmethod

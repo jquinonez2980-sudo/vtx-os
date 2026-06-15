@@ -43,13 +43,18 @@ Next major: QuickBooks Online connector (Sage 50 sunset — see Session 21 in SE
 
 **New client onboarded:**
 - R.L. Electric Inc (`rlelectric`) — BMO xxxx5911, GL 1100, Dec 31 YE
-- Registry row added to `R:\bookkeeping\client_accounts.csv`
+- Registry row added to `R:\bookkeeping\client_accounts.csv` + `config/client_accounts.csv` (baked into Cloud Run image)
 - `RLElectricRuleset` added to `sage50/categorization_rules.py` — rules derived from FY2021 full-year GL
-  (PERFORMANCE FEE→5200, TD LOAN→2625, BELL/VIRGIN→5600, named electrical suppliers→5450,
-   DEPOSITS→4050, fuel+food→5700, personal items→2750 confidence 0, fallback→5900)
 - Smoke test: `tests/rlelectric_categorization_smoke.py` — 65/65 passing
+- FY2022 statements processed so far:
+  - Jan 2022: 51 txns (51/70 extracted — missing 19 are likely embedded cheque-image pages; in BQ as 2022-01)
+  - Apr 2022: 47 txns (26 auto / 21 review) — period 2022-04 ✓
+  - May 2022: 38 txns (25 auto / 13 review) — period 2022-05 ✓
+  - Feb, Mar, Jun–Dec 2022: not yet received; Veronica emailing in batches
+- Dashboard: R.L. Electric Inc visible; `include_approved=true` shows all 51+47+38 items
 - `scripts/start_posting_agent.ps1` — posting agent auto-start via Windows Startup folder shortcut
-- Next: process first BMO statement to confirm real description formats
+- Bug fixed: `gmail_watcher.py` now checks email subject before filename for period detection
+  (Adobe Scan filenames with scan date were overriding the real statement period)
 
 **Fable 5 audit: all M0–M2 milestones complete.**
 
