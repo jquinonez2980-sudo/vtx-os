@@ -320,12 +320,14 @@ def live_approvals(
     limit: int = 500,
     account_no: str | None = None,
     period: str | None = None,
+    include_approved: bool = False,
     _user: dict = Depends(require_user),
 ) -> list[dict[str, Any]]:
     from core.approval_queue import get_pending
     # account_no may be comma-separated for multi-account companies (e.g. Theotherapy BMO + RBC)
     accts = [a.strip() for a in account_no.split(",") if a.strip()] if account_no else None
-    items = get_pending(limit=limit, account_nos=accts, period=period)
+    items = get_pending(limit=limit, account_nos=accts, period=period,
+                        include_approved=include_approved)
     return [it.model_dump(mode="json") for it in items]
 
 

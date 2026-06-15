@@ -76,15 +76,20 @@ def get_pending(
     account_no: str | None = None,
     account_nos: list[str] | None = None,
     period: str | None = None,
+    include_approved: bool = False,
 ) -> list[ApprovalItem]:
-    """Return PENDING items ordered by date ascending (oldest first).
+    """Return PENDING (and optionally APPROVED) items ordered by date ascending.
 
     account_nos: when a company has multiple bank accounts (e.g. Theotherapy BMO + RBC),
     pass all masked account numbers to fetch them together.
     period: bookkeeping period string 'YYYY-MM' — filters by the period field
     (the month the statement was ingested), not txn_date (the actual transaction date).
+    include_approved: also return APPROVED items (auto-categorized, ready to post).
     """
-    where = "status = 'PENDING'"
+    if include_approved:
+        where = "status IN ('PENDING', 'APPROVED')"
+    else:
+        where = "status = 'PENDING'"
     params: list[bigquery.ScalarQueryParameter] = []
     # account_nos takes priority; account_no is kept for backward compat
     accts = account_nos or ([account_no] if account_no else None)
