@@ -1,17 +1,26 @@
 {
   "xxxx5443": {
+    "client_id": "concetta",
     "company_name": "Concetta Enterprises Inc.",
     "industry": "Professional Services",
     "bank": "TD Bank"
   },
   "xxxx1555": {
+    "client_id": "theotherapy",
     "company_name": "Theotherapy",
     "industry": "Healthcare",
     "bank": "BMO"
   },
   "xxxx4733": {
+    "client_id": "theotherapy",
     "company_name": "Theotherapy",
     "industry": "Healthcare",
+    "bank": "BMO"
+  },
+  "xxxx5911": {
+    "client_id": "rlelectric",
+    "company_name": "R.L. Electric Inc.",
+    "industry": "Electrical Contractor",
     "bank": "BMO"
   }
 }

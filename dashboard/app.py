@@ -193,9 +193,11 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
             d["company_name"] = m.get("company_name") or d.get("client_id") or mask
         if not d.get("industry"):
             d["industry"] = m.get("industry", "")
-        # Bank from clients_meta.json overrides BQ-discovered bank_code
+        # Bank and client_id from clients_meta.json override BQ-discovered values
         if m.get("bank"):
             d["bank"] = m["bank"]
+        if m.get("client_id") and not d.get("client_id"):
+            d["client_id"] = m["client_id"]
         return d
 
     # Try the local registry CSV first (works with R: drive mounted locally).
@@ -223,7 +225,21 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
     except Exception:
         pass
 
-    # Fallback: discover distinct clients from BQ approval_queue, deduplicated.
+    # Seed from clients_meta.json — registered clients appear even before their
+    # first BQ row is written (new client onboarding, Cloud Run can't read R:\).
+    seen = {
+        mask: {
+            "client_id": m.get("client_id") or mask,
+            "company_name": m.get("company_name") or m.get("client_id") or mask,
+            "account_masked": mask,
+            "bank": m.get("bank", ""),
+            "gl_bank_account": None,
+            "industry": m.get("industry", ""),
+        }
+        for mask, m in meta.items()
+    }
+
+    # Merge in any accounts discovered from BQ that aren't already in meta.
     try:
         from core.bq_loader import PROJECT, _bq
         rows = list(
@@ -234,14 +250,13 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
                 f"ORDER BY account_no"
             ).result()
         )
-        seen = {}
         for r in rows:
             acct = r.account_no
             if acct in seen:
                 continue
             m = meta.get(acct, {})
             seen[acct] = {
-                "client_id": acct,
+                "client_id": m.get("client_id", acct),
                 "company_name": m.get("company_name", acct),
                 "account_masked": acct,
                 "bank": r.bank_code,
@@ -249,9 +264,10 @@ def live_clients(_user: dict = Depends(require_user)) -> list[dict[str, Any]]:
                 "industry": m.get("industry", ""),
                 "source": "bq_discovery",
             }
-        return list(seen.values())
     except Exception:
-        return []
+        pass
+
+    return list(seen.values())
 
 
 @app.get("/api/live/summary")
