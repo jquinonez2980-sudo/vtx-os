@@ -163,30 +163,40 @@ def gl_accounts(client_id: str) -> list[dict[str, Any]]:
     Falls back to an empty list (caller uses the static ruleset manifest) if BQ
     is unreachable or the client has no data in either table yet.
     """
+    import logging as _log
     p = [bigquery.ScalarQueryParameter("client_id", "STRING", client_id)]
-    sql = f"""
-        SELECT gl_account_no, gl_account_name FROM (
+
+    # Try approval_queue first (always populated for active clients)
+    try:
+        sql_aq = f"""
+            SELECT DISTINCT
+                CAST(suggested_gl_no AS STRING)   AS gl_account_no,
+                suggested_gl_name                 AS gl_account_name
+            FROM `{_ACC}.approval_queue`
+            WHERE account_no = @client_id
+              AND suggested_gl_no IS NOT NULL
+            ORDER BY gl_account_no
+        """
+        rows = _rows(sql_aq, p)
+        if rows:
+            return rows
+    except Exception as e:
+        _log.warning("gl_accounts approval_queue query failed for %s: %s", client_id, e)
+
+    # Fallback: bank_transactions_categorized
+    try:
+        sql_cat = f"""
             SELECT DISTINCT
                 gl_account_no,
                 gl_account_name
             FROM `{_ACC}.bank_transactions_categorized`
             WHERE account_no = @client_id
               AND gl_account_no IS NOT NULL AND gl_account_no != ''
-
-            UNION DISTINCT
-
-            SELECT DISTINCT
-                suggested_gl_no   AS gl_account_no,
-                suggested_gl_name AS gl_account_name
-            FROM `{_ACC}.approval_queue`
-            WHERE account_no = @client_id
-              AND suggested_gl_no IS NOT NULL AND suggested_gl_no != ''
-        )
-        ORDER BY gl_account_no
-    """
-    try:
-        return _rows(sql, p)
-    except Exception:
+            ORDER BY gl_account_no
+        """
+        return _rows(sql_cat, p)
+    except Exception as e:
+        _log.warning("gl_accounts categorized query failed for %s: %s", client_id, e)
         return []
 
 
