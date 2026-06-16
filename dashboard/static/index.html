@@ -1298,6 +1298,13 @@ async function fetchLiveForAccount(accountNo, period) {
       apiFetch('/api/live/audit?limit=8'),
     ]);
 
+    // Fetch GL accounts for the current client (non-blocking; failure = empty list)
+    if (accountNo) {
+      apiFetch('/api/live/gl_accounts?client_id=' + encodeURIComponent(accountNo))
+        .then(gl => { if (Array.isArray(gl)) CLIENT_GL_ACCOUNTS = gl; })
+        .catch(() => {});
+    }
+
     // Replace CLIENTS with live data — no mock mixing
     if (Array.isArray(clientsData) && clientsData.length > 0) {
       liveClients = clientsData;
@@ -1608,6 +1615,7 @@ let currentPeriod   = '2026-04';
 let selectedIds     = new Set();
 let dashSelIds      = new Set();
 let currentEntryId  = null;
+let CLIENT_GL_ACCOUNTS = [];  // [{gl_account_no, gl_account_name}] for current client
 
 // ════════════════════════════════════════ NAV
 // ════════════════════════════════════════ MOBILE SIDEBAR
@@ -1891,7 +1899,7 @@ function renderEntriesTable(tableId) {
     '<tr class="' + (selSet.has(String(e.id))?'selected':'') + '" id="erow-' + escHtml(String(e.id)) + '-' + tableId + '">' +
     '<td><input type="checkbox" data-entry-id="' + escHtml(String(e.id)) + '" ' + (selSet.has(String(e.id))?'checked':'') + ' onchange="toggleEntry(this.dataset.entryId,\'' + tableId + '\',this)"></td>' +
     '<td><span class="mono">' + escHtml(e.date) + '</span></td>' +
-    '<td><div style="font-weight:500">' + escHtml(e.desc) + '</div><div class="td-sub">' + escHtml(e.client) + '</div></td>' +
+    '<td style="max-width:280px"><div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:278px" title="' + escHtml(e.desc) + '">' + escHtml(e.desc) + '</div><div class="td-sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:278px">' + escHtml(e.client) + '</div></td>' +
     (tableId==='entries-table' ? '<td style="font-size:12px;color:var(--t2)">' + escHtml(e.client) + '</td>' : '') +
     '<td style="font-weight:600;color:' + (e.debit>0?'var(--green)':'var(--t4)') + '">' + (e.debit>0?'$'+e.debit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
     '<td style="font-weight:600;color:' + (e.credit>0?'var(--red)':'var(--t4)') + '">' + (e.credit>0?'$'+e.credit.toLocaleString('en',{minimumFractionDigits:2}):'—') + '</td>' +
@@ -2040,20 +2048,31 @@ function openEntryModal(id) {
     '<div style="margin-top:8px;display:flex;align-items:center;gap:10px"><span class="badge badge-teal">' + e.cat + '</span>' +
     '<span style="font:400 12px/1 \'Inter\',sans-serif;color:var(--t3)">Confidence: ' + e.conf + '%</span></div></div>' +
     '<div style="margin-bottom:14px"><label class="field-label">Override Category</label>' +
-    '<select class="select-ctrl" style="margin-top:6px">' +
-    ['Revenue','Cost of Goods','Rent & Occupancy','Payroll','Bank Charges','Software & IT','Office Supplies','Utilities','Inventory / FF&E','Mixed — needs split'].map(c=>'<option ' + (c===e.cat?'selected':'') + '>' + c + '</option>').join('') +
+    '<select id="modal-gl-select" class="select-ctrl" style="margin-top:6px" onchange="updateModalGl(this.value)">' +
+    (CLIENT_GL_ACCOUNTS.length
+      ? CLIENT_GL_ACCOUNTS.map(g => '<option value="' + escHtml(g.gl_account_no) + '"' + (g.gl_account_no===String(e.cat)?'selected':'') + '>' + escHtml(g.gl_account_no + ' — ' + g.gl_account_name) + '</option>').join('')
+      : '<option value="' + escHtml(e.cat) + '" selected>' + escHtml(e.cat) + '</option>') +
     '</select></div>' +
     '<div><label class="field-label">Notes</label><input class="input" type="text" placeholder="Optional note for this transaction…" style="margin-top:6px"></div>';
   document.getElementById('modal-entry').classList.add('open');
 }
 function closeEntryModal() { document.getElementById('modal-entry').classList.remove('open'); }
+function updateModalGl(glNo) {
+  if (!currentEntryId) return;
+  const e = ENTRIES.find(x=>String(x.id)===String(currentEntryId));
+  if (e) e.cat = glNo;
+}
 async function approveFromModal() {
   if (!currentEntryId) return;
   const e = ENTRIES.find(x=>String(x.id)===String(currentEntryId));
+  // Read the current dropdown selection (may have been overridden by user)
+  const sel = document.getElementById('modal-gl-select');
+  const finalGl = (sel ? sel.value : null) || (e && e.cat) || '9999';
   if (e) {
+    e.cat = finalGl;
     e.status = 'approved';
     if (getToken() && e.queue_id) {
-      try { await apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' }); } catch (_) {}
+      try { await apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(finalGl), { method:'POST' }); } catch (_) {}
     }
   }
   closeEntryModal(); renderEntriesTable(); renderDashEntries();

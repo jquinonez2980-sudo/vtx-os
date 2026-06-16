@@ -50,7 +50,24 @@ class ConcettaRuleset:
     8. Rent → 5800
     9. Catch-all Suspense → 5900
     """
-    
+
+    # Static manifest of every GL account this ruleset can emit — used by the
+    # dashboard's category-override dropdown. Keep in sync with the rules below.
+    GL_ACCOUNTS: list[tuple[int, str]] = [
+        (4100, "Revenue"),
+        (5400, "Insurance"),
+        (5200, "Bank Charges & Interest"),
+        (5600, "Telephone & Cellular"),
+        (5700, "Visa"),
+        (5750, "Mastercard"),
+        (5725, "AMEX"),
+        (2100, "Employee Tax Deductions"),
+        (5850, "Wages & Benefits"),
+        (5155, "Car Lease"),
+        (5800, "Rent"),
+        (5900, "Suspense"),
+    ]
+
     def __init__(self):
         """Initialize the ruleset with all categorization rules."""
         self.rules = [
@@ -215,6 +232,29 @@ class TheotherapyRuleset:
     """
 
     SUSPENSE_GL = 5800
+
+    # Static manifest of every GL account this ruleset can emit — used by the
+    # dashboard's category-override dropdown. Keep in sync with the rules below.
+    GL_ACCOUNTS: list[tuple[int, str]] = [
+        (5690, "Interest & Bank Charges"),
+        (5645, "Credit Card Charges"),
+        (5730, "Motor Vehicle Expenses"),
+        (5780, "Telephone"),
+        (5775, "Internet Service"),
+        (5688, "Insurance - Auto"),
+        (5685, "Insurance"),
+        (5790, "Utilities"),
+        (5761, "Rent - Julian"),
+        (5760, "Rent"),
+        (5700, "Office Supplies"),
+        (5630, "Seminar & Conferences"),
+        (5680, "Donation to need peoples"),
+        (5240, "Early Payment Purchase Discounts"),
+        (2130, "Employee tax deductions"),
+        (2160, "Payroll Clearing"),
+        (4020, "Tithes"),
+        (5800, "Suspense"),
+    ]
 
     def __init__(self):
         self.rules = [
@@ -401,6 +441,20 @@ class RLElectricRuleset:
     """
 
     SUSPENSE_GL = 5900
+
+    # Static manifest of every GL account this ruleset can emit — used by the
+    # dashboard's category-override dropdown. Keep in sync with the rules below.
+    GL_ACCOUNTS: list[tuple[int, str]] = [
+        (5200, "Bank Charges & Interest"),
+        (2625, "Bank Loan"),
+        (5600, "Telephone & Cellular"),
+        (2100, "Employee Tax Deduction"),
+        (5450, "Materials & Supplies"),
+        (4050, "General Revenue"),
+        (5700, "Travel, Meals & Entertainment"),
+        (2750, "Shareholder's Advance"),
+        (5900, "Suspense"),
+    ]
 
     def __init__(self):
         self.rules = [

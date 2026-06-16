@@ -315,6 +315,36 @@ def live_audit(limit: int = 50, _user: dict = Depends(require_user)) -> list[dic
     return audit(limit)
 
 
+@app.get("/api/live/gl_accounts")
+def live_gl_accounts(
+    client_id: str,
+    _user: dict = Depends(require_user),
+) -> list[dict[str, Any]]:
+    """Return the GL account manifest for the client's categorization ruleset.
+
+    client_id may be the registry slug ("concetta") or a masked account number
+    ("xxxx5911") — the dashboard passes either depending on call site — so fall
+    back to resolving via the client registry by trailing-4-digit match.
+    """
+    try:
+        from sage50.categorization_rules import get_ruleset
+        rs = get_ruleset(client_id)
+        if rs is None and client_id:
+            from core.client_registry import load_registry
+            last4 = client_id[-4:]
+            for cfg in load_registry().values():
+                if cfg.account_no.endswith(last4):
+                    rs = get_ruleset(cfg.client_id)
+                    if rs is not None:
+                        break
+        if rs is None:
+            return []
+        accounts = getattr(rs, "GL_ACCOUNTS", [])
+        return [{"gl_account_no": str(no), "gl_account_name": name} for no, name in accounts]
+    except Exception:
+        return []
+
+
 @app.get("/api/live/approvals")
 def live_approvals(
     limit: int = 500,
