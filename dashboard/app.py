@@ -320,42 +320,46 @@ def live_gl_accounts(
     client_id: str,
     _user: dict = Depends(require_user),
 ) -> list[dict[str, Any]]:
-    """Return the full GL account list for the client, sourced from BQ.
+    """Return all distinct GL accounts used by this client, sourced from BQ.
 
-    Primary source: distinct (gl_account_no, gl_account_name) from
-    bank_transactions_categorized — grows automatically as transactions are
-    categorized, no manual manifest needed.
+    Uses get_pending() — the same code path that powers the approval queue display —
+    to extract every distinct (suggested_gl_no, suggested_gl_name) pair seen for
+    this client.  Falls back to the static GL_ACCOUNTS manifest for new clients.
 
-    Fallback: static GL_ACCOUNTS manifest from the categorization ruleset, used
-    when the client has no BQ data yet (e.g. first onboarding session).
-
-    client_id may be the registry slug ("concetta") or a masked account number
-    ("xxxx5911").  The registry trailing-4-digit lookup resolves the latter.
+    client_id may be a masked account number ("xxxx5911") or registry slug.
     """
-    from dashboard.queries import gl_accounts as _bq_gl_accounts
+    import logging as _log
 
-    # Resolve masked account number → registry client_id if needed
-    resolved_id = client_id
+    # Primary: extract distinct GL accounts from the approval queue via get_pending(),
+    # which is proven to work (it powers the Review Entries view).
     try:
-        from core.client_registry import load_registry
-        last4 = client_id[-4:] if client_id else ""
-        for cfg in load_registry().values():
-            if cfg.account_no.endswith(last4) or cfg.client_id == client_id:
-                resolved_id = cfg.account_no  # use full account_no for BQ lookup
-                break
-    except Exception:
-        pass
+        from core.approval_queue import get_pending
+        items = get_pending(account_no=client_id, include_approved=True, limit=2000)
+        seen: dict[str, str] = {}
+        for it in items:
+            gl = str(it.suggested_gl_no or "").strip()
+            name = str(it.suggested_gl_name or gl).strip()
+            if gl and gl not in seen:
+                seen[gl] = name
+            # Also capture reviewer-overridden GL (final_gl_no) if present
+            if it.final_gl_no:
+                fgl = str(it.final_gl_no).strip()
+                if fgl and fgl not in seen:
+                    seen[fgl] = seen.get(fgl, fgl)
+        if seen:
+            return sorted(
+                [{"gl_account_no": k, "gl_account_name": v} for k, v in seen.items()],
+                key=lambda r: (int(r["gl_account_no"]) if r["gl_account_no"].isdigit() else 99999),
+            )
+    except Exception as e:
+        _log.warning("gl_accounts get_pending failed for %s: %s", client_id, e)
 
-    # Primary: live BQ data (all accounts ever used for this client)
-    bq_rows = _bq_gl_accounts(resolved_id)
-    if bq_rows:
-        return bq_rows
-
-    # Fallback: static ruleset manifest (covers first-run before any BQ data)
+    # Fallback: static GL_ACCOUNTS manifest (new clients with no BQ data yet)
     try:
         from sage50.categorization_rules import get_ruleset
         rs = get_ruleset(client_id)
-        if rs is None and last4:
+        if rs is None:
+            last4 = client_id[-4:] if client_id else ""
             try:
                 from core.client_registry import load_registry
                 for cfg in load_registry().values():
@@ -552,16 +556,16 @@ def ops_restore_client(
         UPDATE `{PROJECT}.vtx_accounting.approval_queue`
         SET
             status = COALESCE(
-                NULLIF(REGEXP_EXTRACT(IFNULL(review_note, ''), r'^\[archived:([A-Z]+)\]'), 'POSTED'),
+                NULLIF(REGEXP_EXTRACT(IFNULL(review_note, ''), r'^\\[archived:([A-Z]+)\\]'), 'POSTED'),
                 'PENDING'
             ),
             review_note = NULLIF(
-                TRIM(REGEXP_REPLACE(IFNULL(review_note, ''), r'^\[archived:[A-Z]+\] ?', '')),
+                TRIM(REGEXP_REPLACE(IFNULL(review_note, ''), r'^\\[archived:[A-Z]+\\] ?', '')),
                 ''
             )
         WHERE account_no = @account_no
           AND status = 'ARCHIVED'
-          AND NOT REGEXP_CONTAINS(IFNULL(review_note, ''), r'^\[archived:POSTED\]')
+          AND NOT REGEXP_CONTAINS(IFNULL(review_note, ''), r'^\\[archived:POSTED\\]')
     """
     job = bq.query(sql, job_config=_bqmod.QueryJobConfig(
         query_parameters=[_bqmod.ScalarQueryParameter("account_no", "STRING", account_no)]
