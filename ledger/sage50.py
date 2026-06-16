@@ -23,7 +23,14 @@ _COMMENT_MAX = 39
 
 def lid(display_code: str) -> str:
     """Sage 50 display code -> 8-digit lId (e.g. '1065' -> '10650000')."""
-    return str(int(display_code) * 10000)
+    try:
+        return str(int(display_code) * 10000)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            f"lid() requires a numeric GL display code; got {display_code!r}. "
+            "Check that the GL account reference is a plain integer string "
+            "(e.g. '1065'), not an alphanumeric code."
+        ) from exc
 
 
 def bnk_key(entry_date: date, comment: str, abs_amount) -> EntryKey:
@@ -109,13 +116,4 @@ class Sage50Connector(LedgerConnector):
     def _to_bridge(e: LedgerEntry) -> dict:
         c = e.comment[:_COMMENT_MAX]
         return {
-            "date": e.entry_date.isoformat(),
-            "source": e.source,
-            "comment": c,
-            "lines": [
-                {"account_id": lid(l.gl_ref),
-                 "debit": float(l.debit), "credit": float(l.credit),
-                 "comment": c}
-                for l in e.lines
-            ],
-        }
+            "date"

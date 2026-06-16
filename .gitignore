@@ -14,3 +14,6 @@ data/
 =5.0.0
 sage50/=
 sage50_bridge/*.json
+
+# Root-level documentation PDFs — kept locally, not in git
+/*.pdf
