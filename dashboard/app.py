@@ -330,31 +330,9 @@ def live_gl_accounts(
     """
     import logging as _log
 
-    # Primary: extract distinct GL accounts from the approval queue via get_pending(),
-    # which is proven to work (it powers the Review Entries view).
-    try:
-        from core.approval_queue import get_pending
-        items = get_pending(account_no=client_id, include_approved=True, limit=2000)
-        seen: dict[str, str] = {}
-        for it in items:
-            gl = str(it.suggested_gl_no or "").strip()
-            name = str(it.suggested_gl_name or gl).strip()
-            if gl and gl not in seen:
-                seen[gl] = name
-            # Also capture reviewer-overridden GL (final_gl_no) if present
-            if it.final_gl_no:
-                fgl = str(it.final_gl_no).strip()
-                if fgl and fgl not in seen:
-                    seen[fgl] = seen.get(fgl, fgl)
-        if seen:
-            return sorted(
-                [{"gl_account_no": k, "gl_account_name": v} for k, v in seen.items()],
-                key=lambda r: (int(r["gl_account_no"]) if r["gl_account_no"].isdigit() else 99999),
-            )
-    except Exception as e:
-        _log.warning("gl_accounts get_pending failed for %s: %s", client_id, e)
-
-    # Fallback: static GL_ACCOUNTS manifest (new clients with no BQ data yet)
+    # Build a name lookup from the static manifest first (ground-truth names).
+    manifest: dict[str, str] = {}
+    resolved_slug: str | None = None
     try:
         from sage50.categorization_rules import get_ruleset
         rs = get_ruleset(client_id)
@@ -365,16 +343,48 @@ def live_gl_accounts(
                 for cfg in load_registry().values():
                     if cfg.account_no.endswith(last4):
                         rs = get_ruleset(cfg.client_id)
+                        resolved_slug = cfg.client_id
                         if rs is not None:
                             break
             except Exception:
                 pass
         if rs is not None:
-            accounts = getattr(rs, "GL_ACCOUNTS", [])
-            return [{"gl_account_no": str(no), "gl_account_name": name}
-                    for no, name in accounts]
-    except Exception:
-        pass
+            for no, name in getattr(rs, "GL_ACCOUNTS", []):
+                manifest[str(no)] = name
+    except Exception as e:
+        _log.warning("gl_accounts manifest load failed for %s: %s", client_id, e)
+
+    # Primary: approval_queue via get_pending() — same path that powers Review Entries.
+    # Enrich any name that is just the account number (old BQ rows) from manifest.
+    seen: dict[str, str] = {}
+    try:
+        from core.approval_queue import get_pending
+        items = get_pending(account_no=client_id, include_approved=True, limit=2000)
+        for it in items:
+            gl = str(it.suggested_gl_no or "").strip()
+            raw_name = str(it.suggested_gl_name or "").strip()
+            # If the stored name is blank or is just the account number, use manifest
+            name = manifest.get(gl) or (raw_name if raw_name != gl else gl)
+            if gl:
+                seen[gl] = name
+            if it.final_gl_no:
+                fgl = str(it.final_gl_no).strip()
+                if fgl:
+                    seen[fgl] = manifest.get(fgl) or seen.get(fgl, fgl)
+    except Exception as e:
+        _log.warning("gl_accounts get_pending failed for %s: %s", client_id, e)
+
+    # Merge manifest accounts so the full COA is always available, not just
+    # what has been used so far.
+    for gl_no, gl_name in manifest.items():
+        if gl_no not in seen:
+            seen[gl_no] = gl_name
+
+    if seen:
+        return sorted(
+            [{"gl_account_no": k, "gl_account_name": v} for k, v in seen.items()],
+            key=lambda r: (int(r["gl_account_no"]) if r["gl_account_no"].isdigit() else 99999),
+        )
 
     return []
 
