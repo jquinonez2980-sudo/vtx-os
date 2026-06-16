@@ -156,23 +156,36 @@ def audit(limit: int = 50) -> list[dict[str, Any]]:
 def gl_accounts(client_id: str) -> list[dict[str, Any]]:
     """Return all distinct GL accounts used by a client, sourced from BQ.
 
-    Queries bank_transactions_categorized for every gl_account_no / gl_account_name
-    pair that has appeared for this client.  This naturally grows as new transactions
-    are categorized — no manual manifest required.
+    Unions bank_transactions_categorized and approval_queue so the list is
+    populated even when only one table has data for a new client.  This grows
+    automatically as transactions flow through — no manual manifest needed.
 
-    Falls back to an empty list (caller should union with the static ruleset manifest)
-    if BQ is unreachable or the client has no data yet.
+    Falls back to an empty list (caller uses the static ruleset manifest) if BQ
+    is unreachable or the client has no data in either table yet.
     """
+    p = [bigquery.ScalarQueryParameter("client_id", "STRING", client_id)]
     sql = f"""
-        SELECT DISTINCT gl_account_no, gl_account_name
-        FROM `{_ACC}.bank_transactions_categorized`
-        WHERE account_no = @client_id
-          AND gl_account_no IS NOT NULL
-          AND gl_account_no != ''
+        SELECT gl_account_no, gl_account_name FROM (
+            SELECT DISTINCT
+                gl_account_no,
+                gl_account_name
+            FROM `{_ACC}.bank_transactions_categorized`
+            WHERE account_no = @client_id
+              AND gl_account_no IS NOT NULL AND gl_account_no != ''
+
+            UNION DISTINCT
+
+            SELECT DISTINCT
+                suggested_gl_no   AS gl_account_no,
+                suggested_gl_name AS gl_account_name
+            FROM `{_ACC}.approval_queue`
+            WHERE account_no = @client_id
+              AND suggested_gl_no IS NOT NULL AND suggested_gl_no != ''
+        )
         ORDER BY gl_account_no
     """
     try:
-        return _rows(sql, [bigquery.ScalarQueryParameter("client_id", "STRING", client_id)])
+        return _rows(sql, p)
     except Exception:
         return []
 
