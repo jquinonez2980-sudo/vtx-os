@@ -153,6 +153,30 @@ def audit(limit: int = 50) -> list[dict[str, Any]]:
     return _rows(sql)
 
 
+def gl_accounts(client_id: str) -> list[dict[str, Any]]:
+    """Return all distinct GL accounts used by a client, sourced from BQ.
+
+    Queries bank_transactions_categorized for every gl_account_no / gl_account_name
+    pair that has appeared for this client.  This naturally grows as new transactions
+    are categorized — no manual manifest required.
+
+    Falls back to an empty list (caller should union with the static ruleset manifest)
+    if BQ is unreachable or the client has no data yet.
+    """
+    sql = f"""
+        SELECT DISTINCT gl_account_no, gl_account_name
+        FROM `{_ACC}.bank_transactions_categorized`
+        WHERE account_no = @client_id
+          AND gl_account_no IS NOT NULL
+          AND gl_account_no != ''
+        ORDER BY gl_account_no
+    """
+    try:
+        return _rows(sql, [bigquery.ScalarQueryParameter("client_id", "STRING", client_id)])
+    except Exception:
+        return []
+
+
 def unposted(client_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
     """Approval queue items with status=APPROVED — ready to post to Sage 50."""
     limit = max(1, min(int(limit), 1000))

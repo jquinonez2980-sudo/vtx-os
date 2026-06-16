@@ -320,29 +320,59 @@ def live_gl_accounts(
     client_id: str,
     _user: dict = Depends(require_user),
 ) -> list[dict[str, Any]]:
-    """Return the GL account manifest for the client's categorization ruleset.
+    """Return the full GL account list for the client, sourced from BQ.
+
+    Primary source: distinct (gl_account_no, gl_account_name) from
+    bank_transactions_categorized — grows automatically as transactions are
+    categorized, no manual manifest needed.
+
+    Fallback: static GL_ACCOUNTS manifest from the categorization ruleset, used
+    when the client has no BQ data yet (e.g. first onboarding session).
 
     client_id may be the registry slug ("concetta") or a masked account number
-    ("xxxx5911") — the dashboard passes either depending on call site — so fall
-    back to resolving via the client registry by trailing-4-digit match.
+    ("xxxx5911").  The registry trailing-4-digit lookup resolves the latter.
     """
+    from dashboard.queries import gl_accounts as _bq_gl_accounts
+
+    # Resolve masked account number → registry client_id if needed
+    resolved_id = client_id
+    try:
+        from core.client_registry import load_registry
+        last4 = client_id[-4:] if client_id else ""
+        for cfg in load_registry().values():
+            if cfg.account_no.endswith(last4) or cfg.client_id == client_id:
+                resolved_id = cfg.account_no  # use full account_no for BQ lookup
+                break
+    except Exception:
+        pass
+
+    # Primary: live BQ data (all accounts ever used for this client)
+    bq_rows = _bq_gl_accounts(resolved_id)
+    if bq_rows:
+        return bq_rows
+
+    # Fallback: static ruleset manifest (covers first-run before any BQ data)
     try:
         from sage50.categorization_rules import get_ruleset
         rs = get_ruleset(client_id)
-        if rs is None and client_id:
-            from core.client_registry import load_registry
-            last4 = client_id[-4:]
-            for cfg in load_registry().values():
-                if cfg.account_no.endswith(last4):
-                    rs = get_ruleset(cfg.client_id)
-                    if rs is not None:
-                        break
-        if rs is None:
-            return []
-        accounts = getattr(rs, "GL_ACCOUNTS", [])
-        return [{"gl_account_no": str(no), "gl_account_name": name} for no, name in accounts]
+        if rs is None and last4:
+            try:
+                from core.client_registry import load_registry
+                for cfg in load_registry().values():
+                    if cfg.account_no.endswith(last4):
+                        rs = get_ruleset(cfg.client_id)
+                        if rs is not None:
+                            break
+            except Exception:
+                pass
+        if rs is not None:
+            accounts = getattr(rs, "GL_ACCOUNTS", [])
+            return [{"gl_account_no": str(no), "gl_account_name": name}
+                    for no, name in accounts]
     except Exception:
-        return []
+        pass
+
+    return []
 
 
 @app.get("/api/live/approvals")

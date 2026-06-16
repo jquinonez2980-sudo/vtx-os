@@ -96,3 +96,32 @@ def parse_gl_csv(
             ))
 
     return entries
+
+
+def parse_gl_coa(path: str | Path) -> list[tuple[str, str]]:
+    """Return all unique (account_no, account_name) pairs from a Sage 50 GL CSV.
+
+    Unlike parse_gl_csv(), this reads every row — not just the bank account line —
+    making it suitable for populating a full chart-of-accounts list at onboarding time.
+    Rows with blank Account No. are skipped. Pairs are sorted by account_no numerically
+    where possible, falling back to string sort.
+    """
+    path = Path(path)
+    seen: dict[str, str] = {}
+
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            acct = row.get("Account No.", "").strip()
+            if not acct:
+                continue
+            if acct not in seen:
+                seen[acct] = row.get("Account Description", "").strip()
+
+    def _sort_key(pair: tuple[str, str]) -> tuple[int, str]:
+        try:
+            return (int(pair[0]), "")
+        except ValueError:
+            return (99999, pair[0])
+
+    return sorted(seen.items(), key=_sort_key)
