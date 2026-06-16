@@ -1730,6 +1730,7 @@ function filterClients(q) {
 
 function setClient(c) {
   currentClient = c;
+  sessionStorage.setItem('vtx_last_client', c.account_masked || c.client_id || '');
   document.getElementById('client-dropdown').classList.remove('open');
   document.getElementById('cs-name').textContent = clientLabel(c);
   document.getElementById('cq-logo').textContent = c.abbr;
@@ -3309,15 +3310,14 @@ if (!getToken()) {
   const _demoInpInit = document.getElementById('settings-display-name');
   if (_demoInpInit) _demoInpInit.value = '';
 } else {
-  // Live mode: all data from BQ — null period triggers auto-detect of most recent period
-  fetchLiveForAccount(null, null);
+  // Live mode: restore last selected client so header matches data on hard refresh
+  const _lastClient = sessionStorage.getItem('vtx_last_client');
+  fetchLiveForAccount(_lastClient || null, null);
   loadUnposted();
   fetchLiveHST(currentPeriod);
+  // Authenticated users go straight to the dashboard — no landing overlay
+  hideDemoLanding();
 }
-// THE FRONT DOOR: every visit lands here — signed-out visitors get demo/sign-up
-// CTAs; signed-in users get a one-click "Open dashboard →" (their live data is
-// already loading behind the curtain). Identical to the post-sign-out state.
-showDemoLanding();
 // Snapshot synthetic report rows so demo mode can restore them after a live session
 window._rptActivityMockHTML = document.getElementById('rpt-client-activity-tbody')?.innerHTML || '';
 // Close video modal on Escape
