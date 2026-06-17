@@ -199,9 +199,14 @@ def process_one(req: dict, *, dry_run: bool = False) -> None:
         file=sys.stderr,
     )
 
-    # Claim it atomically
+    # Claim it atomically — skip rows still in BQ streaming buffer
     if not dry_run:
-        claim(request_id)
+        if not claim(request_id):
+            print(
+                f"[posting-agent] Skipping {request_id[:8]}: still in streaming buffer",
+                file=sys.stderr,
+            )
+            return
 
     # Pull APPROVED items
     approved = _fetch_approved(account_no, period)

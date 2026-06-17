@@ -49,13 +49,39 @@ def _bq():
 # ---------------------------------------------------------------------------
 
 def enqueue(req: PostRequest) -> None:
-    """Write a QUEUED PostRequest row to vtx_accounting.post_requests."""
+    """Write a QUEUED PostRequest row to vtx_accounting.post_requests.
+
+    Uses a DML INSERT query job (not streaming insert) so the row is immediately
+    available for UPDATE/DELETE by claim() and complete().  BQ streaming-buffer rows
+    cannot be updated for up to 90 minutes — that would break the posting agent.
+    """
     ensure_table(_DATASET, _TABLE, PostRequest)
-    inserted = load_rows(_DATASET, _TABLE, [req])
-    if inserted == 0:
-        raise RuntimeError(
-            f"post_queue.enqueue: BQ insert returned 0 for request_id={req.request_id}"
-        )
+    from google.cloud import bigquery
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    sql = f"""
+        INSERT INTO `{_TABLE_ID}`
+            (request_id, created_at, status, requested_by,
+             client_id, account_no, period,
+             posted_count, error_detail, claimed_at, completed_at,
+             _loaded_at, _session_id)
+        VALUES
+            (@request_id, @created_at, @status, @requested_by,
+             @client_id, @account_no, @period,
+             NULL, NULL, NULL, NULL,
+             @loaded_at, NULL)
+    """
+    params = [
+        bigquery.ScalarQueryParameter("request_id",   "STRING",    req.request_id),
+        bigquery.ScalarQueryParameter("created_at",   "TIMESTAMP", req.created_at.isoformat()),
+        bigquery.ScalarQueryParameter("status",       "STRING",    req.status.value),
+        bigquery.ScalarQueryParameter("requested_by", "STRING",    req.requested_by),
+        bigquery.ScalarQueryParameter("client_id",    "STRING",    req.client_id),
+        bigquery.ScalarQueryParameter("account_no",   "STRING",    req.account_no),
+        bigquery.ScalarQueryParameter("period",       "STRING",    req.period),
+        bigquery.ScalarQueryParameter("loaded_at",    "TIMESTAMP", now),
+    ]
+    _bq().query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
 
 
 def list_recent(
@@ -109,8 +135,14 @@ def list_recent(
     return out
 
 
-def claim(request_id: str) -> None:
-    """Mark a QUEUED job as CLAIMED (called by the local posting agent)."""
+def claim(request_id: str) -> bool:
+    """Mark a QUEUED job as CLAIMED (called by the local posting agent).
+
+    Returns True if the claim succeeded (row was QUEUED and not in streaming buffer).
+    Returns False — and logs a warning — if BQ rejects the UPDATE due to streaming
+    buffer restrictions (row was just inserted; retry in ~90 minutes).
+    Raises on any other BQ error.
+    """
     now = _dt.datetime.now(_dt.timezone.utc).isoformat()
     sql = f"""
         UPDATE `{_TABLE_ID}`
@@ -118,7 +150,19 @@ def claim(request_id: str) -> None:
         WHERE request_id = '{request_id}'
           AND status = 'QUEUED'
     """
-    _bq().query(sql).result()
+    try:
+        _bq().query(sql).result()
+        return True
+    except Exception as exc:
+        if "streaming buffer" in str(exc):
+            import sys
+            print(
+                f"[post_queue] claim({request_id[:8]}): row still in BQ streaming buffer — "
+                "skip this job; retry in ~90 min",
+                file=sys.stderr,
+            )
+            return False
+        raise
 
 
 def complete(
