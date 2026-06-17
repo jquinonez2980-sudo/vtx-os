@@ -658,13 +658,13 @@ namespace Sage50Bridge
             catch { return ""; }
         }
 
-        // "YYYY-MM-DD" → "MM/DD/YYYY"
+        // "YYYY-MM-DD" → "DD/MM/YYYY"  (Sage 50 SetJournalDate expects DD/MM/YYYY)
         private static string IsoToSageDate(string iso)
         {
             if (!string.IsNullOrEmpty(iso) && iso.Length == 10 && iso[4] == '-')
             {
                 var p = iso.Split('-');
-                return p[1] + "/" + p[2] + "/" + p[0];
+                return p[2] + "/" + p[1] + "/" + p[0];
             }
             return iso ?? "";
         }
