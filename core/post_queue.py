@@ -50,9 +50,8 @@ def _bq():
 
 def enqueue(req: PostRequest) -> None:
     """Write a QUEUED PostRequest row to vtx_accounting.post_requests."""
-    ensure_table(PostRequest, _DATASET, _TABLE)
-    rows = [req.model_dump(mode="json")]
-    inserted = load_rows(rows, _DATASET, _TABLE)
+    ensure_table(_DATASET, _TABLE, PostRequest)
+    inserted = load_rows(_DATASET, _TABLE, [req])
     if inserted == 0:
         raise RuntimeError(
             f"post_queue.enqueue: BQ insert returned 0 for request_id={req.request_id}"
