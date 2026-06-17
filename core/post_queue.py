@@ -1,126 +1,143 @@
 """
-Post-request queue — BQ-backed handoff between the dashboard ("Post to Sage"
-button on Cloud Run) and the local posting agent (scripts/posting_agent.py,
-which runs on the Windows machine where Sage 50 + the bridge live).
+core/post_queue.py
 
-All writes use DML (INSERT/UPDATE queries), never streaming inserts: rows in
-the streaming buffer cannot be UPDATEd for up to 90 minutes, and the agent
-must claim a QUEUED row seconds after the dashboard creates it.
+BQ-backed posting queue for the Sage 50 post workflow.
+
+  enqueue(req)              — write a QUEUED PostRequest row to BQ
+  list_recent(limit, ...)   — read recent PostRequest rows (any status)
+  claim(request_id)         — mark CLAIMED (used by scripts/posting_agent.py)
+  complete(request_id, ...) — mark DONE or FAILED with result detail
+
+Table: vtx_accounting.post_requests
+  Created lazily by ensure_table() on first write.
+  Not partitioned (volume is low; one row per posting job).
 """
 
 from __future__ import annotations
 
-import sys
+import datetime as _dt
+import os
+from typing import Any
 
-from google.cloud import bigquery
+from core.bq_loader import PROJECT, ensure_table, load_rows
+from models.posting import PostRequest, PostStatus
 
-from core.bq_loader import PROJECT, _bq, ensure_table
-from models.posting import PostRequest, PostRequestStatus
+_DATASET   = "vtx_accounting"
+_TABLE     = "post_requests"
+_TABLE_ID  = f"{PROJECT}.{_DATASET}.{_TABLE}"
 
-DATASET  = "vtx_accounting"
-TABLE    = "post_requests"
-TABLE_ID = f"{PROJECT}.{DATASET}.{TABLE}"
-
-
-def _ensure() -> None:
-    ensure_table(DATASET, TABLE, PostRequest)
+_BQ_CFG: dict[str, Any] = {}   # no partition/cluster — low-volume table
 
 
-def enqueue(req: PostRequest) -> PostRequest:
-    """Insert a QUEUED post request via DML. Returns the request."""
-    _ensure()
-    sql = f"""
-        INSERT INTO `{TABLE_ID}`
-            (request_id, requested_at, requested_by, client_id, account_no,
-             period, status, posted, skipped, errors, result_note)
-        VALUES
-            (@request_id, CURRENT_TIMESTAMP(), @requested_by, @client_id,
-             @account_no, @period, @status, 0, 0, 0, "")
+# ---------------------------------------------------------------------------
+# Internal BQ client (same lazy-singleton pattern as approval_queue.py)
+# ---------------------------------------------------------------------------
+
+_bq_client = None
+
+
+def _bq():
+    global _bq_client
+    if _bq_client is None:
+        from google.cloud import bigquery
+        _bq_client = bigquery.Client(project=PROJECT)
+    return _bq_client
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def enqueue(req: PostRequest) -> None:
+    """Write a QUEUED PostRequest row to vtx_accounting.post_requests."""
+    ensure_table(PostRequest, _DATASET, _TABLE)
+    rows = [req.model_dump(mode="json")]
+    inserted = load_rows(rows, _DATASET, _TABLE)
+    if inserted == 0:
+        raise RuntimeError(
+            f"post_queue.enqueue: BQ insert returned 0 for request_id={req.request_id}"
+        )
+
+
+def list_recent(
+    limit: int = 20,
+    account_no: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return recent posting jobs (all statuses), newest first.
+
+    Used by /api/ops/post-requests to power the Sage 50 post-history view.
+    Returns JSON-safe dicts (datetimes as ISO strings).
     """
-    params = [
-        bigquery.ScalarQueryParameter("request_id",   "STRING", req.request_id),
-        bigquery.ScalarQueryParameter("requested_by", "STRING", req.requested_by),
-        bigquery.ScalarQueryParameter("client_id",    "STRING", req.client_id),
-        bigquery.ScalarQueryParameter("account_no",   "STRING", req.account_no),
-        bigquery.ScalarQueryParameter("period",       "STRING", req.period),
-        bigquery.ScalarQueryParameter("status",       "STRING", req.status.value),
-    ]
-    _bq().query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
-    return req
+    limit = max(1, min(int(limit), 200))
+    where_clauses = []
+    params = []
 
-
-def fetch_queued(limit: int = 10) -> list[PostRequest]:
-    """Oldest-first QUEUED requests."""
-    _ensure()
-    sql = f"""
-        SELECT * FROM `{TABLE_ID}`
-        WHERE status = 'QUEUED'
-        ORDER BY requested_at ASC
-        LIMIT {int(limit)}
-    """
-    rows = list(_bq().query(sql).result())
-    return [PostRequest.model_validate(dict(r.items())) for r in rows]
-
-
-def list_recent(limit: int = 20, account_no: str | None = None) -> list[dict]:
-    """Recent requests (any status), newest first — for the dashboard view."""
-    _ensure()
-    where = "TRUE"
-    params: list = []
     if account_no:
-        where = "account_no = @account_no"
-        params.append(bigquery.ScalarQueryParameter("account_no", "STRING", account_no))
+        where_clauses.append("account_no = @account_no")
+        from google.cloud import bigquery
+        params.append(
+            bigquery.ScalarQueryParameter("account_no", "STRING", account_no)
+        )
+
+    where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
     sql = f"""
-        SELECT * FROM `{TABLE_ID}`
-        WHERE {where}
-        ORDER BY requested_at DESC
-        LIMIT {int(limit)}
+        SELECT
+            request_id, created_at, status,
+            requested_by, client_id, account_no, period,
+            posted_count, error_detail, claimed_at, completed_at
+        FROM `{_TABLE_ID}`
+        {where}
+        ORDER BY created_at DESC
+        LIMIT {limit}
     """
-    cfg = bigquery.QueryJobConfig(query_parameters=params) if params else None
-    rows = list(_bq().query(sql, job_config=cfg).result())
-    return [PostRequest.model_validate(dict(r.items())).model_dump(mode="json") for r in rows]
+    from google.cloud import bigquery
+    cfg = bigquery.QueryJobConfig(query_parameters=params)
+    try:
+        result = _bq().query(sql, job_config=cfg).result()
+    except Exception:
+        # Table doesn't exist yet — return empty list gracefully
+        return []
+
+    out: list[dict[str, Any]] = []
+    for row in result:
+        d = dict(row.items()) if hasattr(row, "items") else dict(row)
+        # Normalise datetime fields to ISO strings for JSON serialisation
+        for k, v in d.items():
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                d[k] = v.isoformat()
+        out.append(d)
+    return out
 
 
-def claim(request_id: str) -> bool:
-    """QUEUED -> RUNNING. Returns False if someone else claimed it first."""
+def claim(request_id: str) -> None:
+    """Mark a QUEUED job as CLAIMED (called by the local posting agent)."""
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
     sql = f"""
-        UPDATE `{TABLE_ID}`
-        SET status = 'RUNNING', started_at = CURRENT_TIMESTAMP()
-        WHERE request_id = @request_id AND status = 'QUEUED'
+        UPDATE `{_TABLE_ID}`
+        SET status = 'CLAIMED', claimed_at = '{now}'
+        WHERE request_id = '{request_id}'
+          AND status = 'QUEUED'
     """
-    job = _bq().query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("request_id", "STRING", request_id)]))
-    job.result()
-    return bool(job.num_dml_affected_rows)
+    _bq().query(sql).result()
 
 
 def complete(
     request_id: str,
-    status: PostRequestStatus,
-    posted: int = 0,
-    skipped: int = 0,
-    errors: int = 0,
-    note: str = "",
-) -> bool:
-    """RUNNING -> DONE | FAILED with result counts."""
+    *,
+    posted_count: int = 0,
+    error_detail: str = "",
+) -> None:
+    """Mark a CLAIMED job as DONE or FAILED (called by the local posting agent)."""
+    status = PostStatus.DONE.value if not error_detail else PostStatus.FAILED.value
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    error_escaped = error_detail.replace("'", "\\'")
     sql = f"""
-        UPDATE `{TABLE_ID}`
-        SET status = @status, completed_at = CURRENT_TIMESTAMP(),
-            posted = @posted, skipped = @skipped, errors = @errors,
-            result_note = @note
-        WHERE request_id = @request_id
+        UPDATE `{_TABLE_ID}`
+        SET status        = '{status}',
+            completed_at  = '{now}',
+            posted_count  = {posted_count},
+            error_detail  = '{error_escaped}'
+        WHERE request_id = '{request_id}'
     """
-    params = [
-        bigquery.ScalarQueryParameter("status",     "STRING", status.value),
-        bigquery.ScalarQueryParameter("posted",     "INT64",  posted),
-        bigquery.ScalarQueryParameter("skipped",    "INT64",  skipped),
-        bigquery.ScalarQueryParameter("errors",     "INT64",  errors),
-        bigquery.ScalarQueryParameter("note",       "STRING", note[:1000]),
-        bigquery.ScalarQueryParameter("request_id", "STRING", request_id),
-    ]
-    try:
-        _bq().query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params)).result()
-        return True
-    except Exception as exc:
-        print(f"[post_queue] complete() failed for {request_id}: {exc}", file=sys.stderr)
-        return False
+    _bq().query(sql).result()
