@@ -523,10 +523,11 @@
         <select class="select-ctrl" style="width:220px" id="watcher-client-select" onchange="updateWatcherClient()">
           <option value="all">All Active Clients</option>
         </select>
-        <button class="btn btn-secondary" onclick="loadFromFolder()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-          Load from Folder
+        <button class="btn btn-secondary" onclick="document.getElementById('upload-stmt-input').click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload PDF
         </button>
+        <input id="upload-stmt-input" type="file" accept=".pdf" style="display:none" onchange="uploadStatement(this)">
         <button class="btn btn-teal" id="run-watcher-btn" onclick="runWatcher()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Run Gmail Watcher
@@ -546,20 +547,21 @@
         <div class="bank-chip" data-bank="BMO" onclick="toggleBank(this)">BMO</div>
         <div class="bank-chip" data-bank="National Bank" onclick="toggleBank(this)">National Bank</div>
         <div class="bank-chip" data-bank="Desjardins" onclick="toggleBank(this)">Desjardins</div>
+        <div class="bank-chip" data-bank="DUCA Credit Union" onclick="toggleBank(this)">DUCA</div>
         <div class="bank-chip" data-bank="American Express" onclick="toggleBank(this)">American Express</div>
       </div>
       <div style="padding:14px 20px;display:flex;gap:14px">
         <div style="flex:1">
           <label class="field-label">Gmail Label / Folder</label>
-          <input class="input" type="text" placeholder="e.g. Bank Statements / Finance / Inbox" value="Finance/Bank Statements">
+          <input class="input" id="watcher-label-input" type="text" placeholder="e.g. bank statement to be processed" value="bank statement to be processed">
         </div>
         <div style="flex:1">
           <label class="field-label">Lookback Period</label>
-          <select class="select-ctrl">
-            <option>Current month</option>
-            <option>Last 30 days</option>
-            <option selected>Last 60 days</option>
-            <option>Last 90 days</option>
+          <select class="select-ctrl" id="watcher-lookback-select">
+            <option value="31">Current month</option>
+            <option value="30">Last 30 days</option>
+            <option value="60" selected>Last 60 days</option>
+            <option value="90">Last 90 days</option>
           </select>
         </div>
         <div style="flex:1">
@@ -1144,6 +1146,7 @@
             <option>RBC</option><option>TD Bank</option><option>BMO</option>
             <option>Scotiabank</option><option>CIBC</option><option>National Bank</option>
             <option>American Express</option><option>Desjardins</option>
+            <option>DUCA Credit Union</option><option>Other Credit Union</option>
           </select>
         </div>
       </div>
@@ -1166,6 +1169,18 @@
           <div class="field-hint">Gmail will be watched for these senders</div>
         </div>
         <div></div>
+      </div>
+      <div class="form-row" style="margin-top:4px">
+        <div>
+          <label class="field-label">Prior-Year GL Export <span style="font-weight:400;color:var(--t3)">(optional — builds expense ruleset)</span></label>
+          <input class="input" id="ob-gl-file" type="file" accept=".csv" style="padding:5px 8px;cursor:pointer">
+          <div class="field-hint">Sage 50 General Ledger CSV export (BNK entries used to infer GL mappings)</div>
+        </div>
+        <div>
+          <label class="field-label">Chart of Accounts Export <span style="font-weight:400;color:var(--t3)">(optional)</span></label>
+          <input class="input" id="ob-coa-file" type="file" accept=".csv" style="padding:5px 8px;cursor:pointer">
+          <div class="field-hint">Sage 50 Chart of Accounts CSV — used to resolve GL account names</div>
+        </div>
       </div>
       <div class="form-row cols-3">
         <div>
@@ -1237,6 +1252,61 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
+function _watcherQueryParams(clientId) {
+  const qs = new URLSearchParams();
+  if (clientId) qs.set('client', clientId);
+  const label = document.getElementById('watcher-label-input')?.value?.trim();
+  if (label) qs.set('label', label);
+  const lookback = document.getElementById('watcher-lookback-select')?.value;
+  if (lookback) qs.set('lookback_days', lookback);
+  qs.set('max_messages', '8');
+  qs.set('stream', 'true');
+  return qs;
+}
+
+function _logLineClass(line) {
+  return line.startsWith('✓') || /ok|success/i.test(line) ? 'ok'
+       : line.startsWith('⚠') || /error|fail|warn/i.test(line) ? 'warn'
+       : line.startsWith('[') || /info|start|connect|checking/i.test(line) ? 'info' : '';
+}
+
+async function _runWatcherStream(path, onLine) {
+  const token = getToken();
+  if (!token) throw Object.assign(new Error('Demo mode: live data is not available'), { status: 0 });
+  const res = await fetch(API_BASE + path, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token },
+  });
+  if (!res.ok) throw new Error(res.status + ': ' + (await res.text()));
+  if (!res.body) throw new Error('Streaming not supported by browser');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = { ok: false, lines: [], code: -1 };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n');
+    buffer = parts.pop() || '';
+    for (const part of parts) {
+      if (!part.trim()) continue;
+      let evt;
+      try { evt = JSON.parse(part); } catch (_) { continue; }
+      if (evt.type === 'line' && evt.text) {
+        result.lines.push(evt.text);
+        onLine(evt.text);
+      } else if (evt.type === 'end') {
+        result.ok = !!evt.ok;
+        result.code = evt.code ?? -1;
+      }
+    }
+  }
+  return result;
+}
+
 function updateModeBanner() {
   const banner = document.getElementById('mode-banner');
   const settingsBadge = document.getElementById('mode-badge-settings');
@@ -1297,6 +1367,9 @@ async function fetchLiveForAccount(accountNo, period) {
       apiFetch('/api/live/approvals?limit=1000' + acctParam + periodParam),
       apiFetch('/api/live/audit?limit=8'),
     ]);
+
+    // Guard: user may have signed out while BQ queries were in-flight
+    if (!getToken()) return;
 
     // Fetch GL accounts for the current client (non-blocking; failure = empty list)
     if (accountNo) {
@@ -1531,7 +1604,7 @@ function saveToken() {
     if (_stInp) _stInp.value = '';
     updateModeBanner();
     showToast('Key saved — loading live data…', 'success');
-    fetchLiveForAccount(currentClient?.client_id, null);
+    fetchLiveForAccount(currentClient?.account_masked || currentClient?.client_id, null);
     loadUnposted();
   } else {
     enterDemoMode();
@@ -1890,7 +1963,7 @@ function renderEntriesTable(tableId) {
   const tbody = document.getElementById(tableId);
   if (!tbody) return;
   const filterClient = tableId==='entries-table' ? (document.getElementById('entries-client-filter')?.value || 'all') : 'all';
-  let rows = ENTRIES.filter(e => e.status !== 'approved');
+  let rows = ENTRIES.filter(e => e.status !== 'approved' && e.status !== 'rejected');
   if (filterClient !== 'all') {
     const c = CLIENTS.find(c => c.id == filterClient);
     if (c) rows = rows.filter(e => e.client.includes(c.name.split(' ')[0]));
@@ -1916,7 +1989,7 @@ function renderEntriesTable(tableId) {
 function renderDashEntries() {
   const tbody = document.getElementById('dash-entries-table');
   if (!tbody) return;
-  const rows = ENTRIES.filter(e => e.status !== 'approved').slice(0, 5);
+  const rows = ENTRIES.filter(e => e.status !== 'approved' && e.status !== 'rejected').slice(0, 5);
   tbody.innerHTML = rows.map(e =>
     '<tr class="' + (dashSelIds.has(String(e.id))?'selected':'') + '">' +
     '<td><input type="checkbox" data-entry-id="' + escHtml(String(e.id)) + '" ' + (dashSelIds.has(String(e.id))?'checked':'') + ' onchange="toggleDashEntry(this.dataset.entryId,this)"></td>' +
@@ -1940,18 +2013,18 @@ function toggleEntry(id, tableId, cb) {
 }
 function toggleDashEntry(id, cb) { toggleEntry(id,'dash-entries-table',cb); }
 function toggleAllEntries(cb) {
-  ENTRIES.filter(e=>e.status!=='approved').forEach(e => cb.checked ? selectedIds.add(String(e.id)) : selectedIds.delete(String(e.id)));
+  ENTRIES.filter(e=>e.status!=='approved'&&e.status!=='rejected').forEach(e => cb.checked ? selectedIds.add(String(e.id)) : selectedIds.delete(String(e.id)));
   renderEntriesTable();
   updateEntriesToolbar('entries-table');
 }
 function toggleAllDash(cb) {
-  ENTRIES.filter(e=>e.status!=='approved').slice(0,5).forEach(e => cb.checked ? dashSelIds.add(String(e.id)) : dashSelIds.delete(String(e.id)));
+  ENTRIES.filter(e=>e.status!=='approved'&&e.status!=='rejected').slice(0,5).forEach(e => cb.checked ? dashSelIds.add(String(e.id)) : dashSelIds.delete(String(e.id)));
   renderDashEntries();
   updateEntriesToolbar('dash-entries-table');
 }
 function updateEntriesToolbar(tableId) {
   if (tableId==='entries-table') {
-    const n = selectedIds.size, total = ENTRIES.filter(e=>e.status!=='approved').length;
+    const n = selectedIds.size, total = ENTRIES.filter(e=>e.status!=='approved'&&e.status!=='rejected').length;
     document.getElementById('entries-sel-count').textContent = n + ' of ' + total + ' selected';
     document.getElementById('approve-btn').disabled = n===0;
     document.getElementById('reject-btn').disabled  = n===0;
@@ -1966,74 +2039,138 @@ function updateEntriesToolbar(tableId) {
 async function approveSelected() {
   const n = selectedIds.size;
   const ids = [...selectedIds];
-  ids.forEach(id => { const e = ENTRIES.find(x=>String(x.id)===id); if(e) e.status='approved'; });
   selectedIds.clear();
+  let okCount = 0;
   if (getToken()) {
-    try {
-      await Promise.allSettled(ids.map(id => {
-        const e = ENTRIES.find(x=>String(x.id)===id);
-        if (!e?.queue_id) return Promise.resolve();
-        return apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' });
-      }));
-    } catch (_) {}
+    const results = await Promise.allSettled(ids.map(async id => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (!e?.queue_id) return false;
+      try {
+        await apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat || '9999'), { method: 'POST' });
+        return true;
+      } catch (_) { return false; }
+    }));
+    ids.forEach((id, i) => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (e && results[i].status === 'fulfilled' && results[i].value) { e.status = 'approved'; okCount++; }
+    });
+  } else {
+    ids.forEach(id => { const e = ENTRIES.find(x => String(x.id) === id); if (e) { e.status = 'approved'; okCount++; } });
   }
   renderEntriesTable();
   updateEntriesToolbar('entries-table');
-  const pending = ENTRIES.filter(e=>e.status==='pending'||e.status==='review').length;
+  const pending = ENTRIES.filter(e => e.status === 'pending' || e.status === 'review').length;
   document.getElementById('kpi-pending').textContent = pending;
   document.getElementById('sb-pending-badge').textContent = pending;
-  showToast(n + ' entr' + (n===1?'y':'ies') + ' approved and queued for Sage 50', 'success');
+  showToast(okCount + ' entr' + (okCount === 1 ? 'y' : 'ies') + ' approved and queued for Sage 50', okCount ? 'success' : 'warning');
 }
-function rejectSelected() {
-  const n = selectedIds.size; selectedIds.clear();
+async function rejectSelected() {
+  const n = selectedIds.size;
+  const ids = [...selectedIds];
+  selectedIds.clear();
+  let okCount = 0;
+  if (getToken()) {
+    const results = await Promise.allSettled(ids.map(async id => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (!e?.queue_id) return false;
+      try {
+        await apiFetch('/api/live/approvals/' + encodeURIComponent(e.queue_id) + '/reject', { method: 'POST' });
+        return true;
+      } catch (_) { return false; }
+    }));
+    ids.forEach((id, i) => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (e && results[i].status === 'fulfilled' && results[i].value) { e.status = 'rejected'; okCount++; }
+    });
+  } else {
+    ids.forEach(id => { const e = ENTRIES.find(x => String(x.id) === id); if (e) { e.status = 'rejected'; okCount++; } });
+  }
   renderEntriesTable(); updateEntriesToolbar('entries-table');
-  showToast(n + ' entr' + (n===1?'y':'ies') + ' flagged for manual review', 'warning');
+  const pending = ENTRIES.filter(e => e.status === 'pending' || e.status === 'review').length;
+  document.getElementById('kpi-pending').textContent = pending;
+  document.getElementById('sb-pending-badge').textContent = pending;
+  showToast(okCount + ' entr' + (okCount === 1 ? 'y' : 'ies') + ' rejected', okCount ? 'warning' : 'error');
 }
 async function approveHighConfidence() {
   const highConf = ENTRIES.filter(e => e.status !== 'approved' && e.conf >= 80);
   if (!highConf.length) { showToast('No entries with ≥80% confidence to approve', 'info'); return; }
   const n = highConf.length;
   if (!confirm('Auto-approve ' + n + ' entries with ≥80% confidence?')) return;
-  highConf.forEach(e => { e.status = 'approved'; });
+  let okCount = 0;
   if (getToken()) {
-    try {
-      await Promise.allSettled(highConf.map(e =>
-        apiFetch('/api/live/approvals/' + encodeURIComponent(e.queue_id || e.id) + '/approve', {
-          method: 'POST',
-          body: JSON.stringify({ final_gl_no: e.cat || '9999' }),
-        }).catch(() => {})
-      ));
-    } catch (_) {}
+    const results = await Promise.allSettled(highConf.map(async e => {
+      if (!e.queue_id) return false;
+      try {
+        await apiFetch('/api/live/approvals/' + encodeURIComponent(e.queue_id) + '/approve?final_gl_no=' + encodeURIComponent(e.cat || '9999'), { method: 'POST' });
+        return true;
+      } catch (_) { return false; }
+    }));
+    highConf.forEach((e, i) => {
+      if (results[i].status === 'fulfilled' && results[i].value) { e.status = 'approved'; okCount++; }
+    });
+  } else {
+    highConf.forEach(e => { e.status = 'approved'; okCount++; });
   }
   selectedIds.clear();
   renderEntriesTable(); renderDashEntries();
-  showToast(n + ' high-confidence entr' + (n===1?'y':'ies') + ' approved', 'success');
+  showToast(okCount + ' high-confidence entr' + (okCount === 1 ? 'y' : 'ies') + ' approved', okCount ? 'success' : 'warning');
 }
 async function approveDash() {
   const n = dashSelIds.size;
   const ids = [...dashSelIds];
-  ids.forEach(id => { const e = ENTRIES.find(x=>String(x.id)===id); if(e) e.status='approved'; });
   dashSelIds.clear();
+  let okCount = 0;
   if (getToken()) {
-    try {
-      await Promise.allSettled(ids.map(id => {
-        const e = ENTRIES.find(x=>String(x.id)===id);
-        if (!e?.queue_id) return Promise.resolve();
-        return apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat||'9999'), { method:'POST' });
-      }));
-    } catch (_) {}
+    const results = await Promise.allSettled(ids.map(async id => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (!e?.queue_id) return false;
+      try {
+        await apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(e.cat || '9999'), { method: 'POST' });
+        return true;
+      } catch (_) { return false; }
+    }));
+    ids.forEach((id, i) => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (e && results[i].status === 'fulfilled' && results[i].value) { e.status = 'approved'; okCount++; }
+    });
+  } else {
+    ids.forEach(id => { const e = ENTRIES.find(x => String(x.id) === id); if (e) { e.status = 'approved'; okCount++; } });
   }
   renderDashEntries(); updateEntriesToolbar('dash-entries-table');
-  showToast(n + ' entr' + (n===1?'y':'ies') + ' approved', 'success');
+  showToast(okCount + ' entr' + (okCount === 1 ? 'y' : 'ies') + ' approved', okCount ? 'success' : 'warning');
 }
-function rejectDash() {
-  const n = dashSelIds.size; dashSelIds.clear();
+async function rejectDash() {
+  const n = dashSelIds.size;
+  const ids = [...dashSelIds];
+  dashSelIds.clear();
+  let okCount = 0;
+  if (getToken()) {
+    const results = await Promise.allSettled(ids.map(async id => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (!e?.queue_id) return false;
+      try {
+        await apiFetch('/api/live/approvals/' + encodeURIComponent(e.queue_id) + '/reject', { method: 'POST' });
+        return true;
+      } catch (_) { return false; }
+    }));
+    ids.forEach((id, i) => {
+      const e = ENTRIES.find(x => String(x.id) === id);
+      if (e && results[i].status === 'fulfilled' && results[i].value) { e.status = 'rejected'; okCount++; }
+    });
+  } else {
+    ids.forEach(id => { const e = ENTRIES.find(x => String(x.id) === id); if (e) { e.status = 'rejected'; okCount++; } });
+  }
   renderDashEntries(); updateEntriesToolbar('dash-entries-table');
-  showToast(n + ' entr' + (n===1?'y':'ies') + ' flagged', 'warning');
+  showToast(okCount + ' entr' + (okCount === 1 ? 'y' : 'ies') + ' rejected', okCount ? 'warning' : 'error');
 }
 function exportEntries() { showToast('CSV export prepared — check your downloads', 'info'); }
 
 // ════════════════════════════════════════ ENTRY MODAL
+function _buildModalGlSelect(e) {
+  return (CLIENT_GL_ACCOUNTS.length
+    ? CLIENT_GL_ACCOUNTS.map(g => '<option value="' + escHtml(g.gl_account_no) + '"' + (g.gl_account_no===String(e.cat)?'selected':'') + '>' + escHtml(g.gl_account_no + ' — ' + g.gl_account_name) + '</option>').join('')
+    : '<option value="' + escHtml(e.cat) + '" selected>' + escHtml(e.cat) + '</option>');
+}
 function openEntryModal(id) {
   currentEntryId = id;
   const e = ENTRIES.find(x=>String(x.id)===String(id)); if(!e) return;
@@ -2050,12 +2187,25 @@ function openEntryModal(id) {
     '<span style="font:400 12px/1 \'Inter\',sans-serif;color:var(--t3)">Confidence: ' + e.conf + '%</span></div></div>' +
     '<div style="margin-bottom:14px"><label class="field-label">Override Category</label>' +
     '<select id="modal-gl-select" class="select-ctrl" style="margin-top:6px" onchange="updateModalGl(this.value)">' +
-    (CLIENT_GL_ACCOUNTS.length
-      ? CLIENT_GL_ACCOUNTS.map(g => '<option value="' + escHtml(g.gl_account_no) + '"' + (g.gl_account_no===String(e.cat)?'selected':'') + '>' + escHtml(g.gl_account_no + ' — ' + g.gl_account_name) + '</option>').join('')
-      : '<option value="' + escHtml(e.cat) + '" selected>' + escHtml(e.cat) + '</option>') +
+    _buildModalGlSelect(e) +
     '</select></div>' +
     '<div><label class="field-label">Notes</label><input class="input" type="text" placeholder="Optional note for this transaction…" style="margin-top:6px"></div>';
   document.getElementById('modal-entry').classList.add('open');
+  // Always refresh gl_accounts on modal open — ensures the full COA is shown
+  // even if a partial list (BQ-seen accounts only) was cached from an earlier call.
+  if (e.client && getToken()) {
+    apiFetch('/api/live/gl_accounts?client_id=' + encodeURIComponent(e.client))
+      .then(gl => {
+        if (Array.isArray(gl) && gl.length > CLIENT_GL_ACCOUNTS.length) {
+          CLIENT_GL_ACCOUNTS = gl;
+          if (currentEntryId === id) {
+            const sel = document.getElementById('modal-gl-select');
+            if (sel) sel.innerHTML = _buildModalGlSelect(e);
+          }
+        }
+      })
+      .catch(() => {});
+  }
 }
 function closeEntryModal() { document.getElementById('modal-entry').classList.remove('open'); }
 function updateModalGl(glNo) {
@@ -2065,21 +2215,38 @@ function updateModalGl(glNo) {
 }
 async function approveFromModal() {
   if (!currentEntryId) return;
-  const e = ENTRIES.find(x=>String(x.id)===String(currentEntryId));
-  // Read the current dropdown selection (may have been overridden by user)
+  const e = ENTRIES.find(x => String(x.id) === String(currentEntryId));
   const sel = document.getElementById('modal-gl-select');
   const finalGl = (sel ? sel.value : null) || (e && e.cat) || '9999';
+  let ok = !getToken();
   if (e) {
     e.cat = finalGl;
-    e.status = 'approved';
     if (getToken() && e.queue_id) {
-      try { await apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(finalGl), { method:'POST' }); } catch (_) {}
+      try {
+        await apiFetch('/api/live/approvals/' + e.queue_id + '/approve?final_gl_no=' + encodeURIComponent(finalGl), { method: 'POST' });
+        ok = true;
+      } catch (_) { ok = false; }
     }
+    if (ok) e.status = 'approved';
   }
   closeEntryModal(); renderEntriesTable(); renderDashEntries();
-  showToast('Entry approved', 'success');
+  showToast(ok ? 'Entry approved' : 'Approve failed — entry still pending', ok ? 'success' : 'warning');
 }
-function rejectFromModal() { closeEntryModal(); showToast('Entry flagged for manual review', 'warning'); }
+async function rejectFromModal() {
+  const e = ENTRIES.find(x => String(x.id) === String(currentEntryId));
+  let ok = !getToken();
+  if (e) {
+    if (getToken() && e.queue_id) {
+      try {
+        await apiFetch('/api/live/approvals/' + encodeURIComponent(e.queue_id) + '/reject', { method: 'POST' });
+        ok = true;
+      } catch (_) { ok = false; }
+    }
+    if (ok) e.status = 'rejected';
+  }
+  closeEntryModal(); renderEntriesTable(); renderDashEntries();
+  showToast(ok ? 'Entry rejected' : 'Reject failed — entry still pending', ok ? 'warning' : 'error');
+}
 
 // ════════════════════════════════════════ UTILITIES
 function escHtml(s) {
@@ -2139,6 +2306,7 @@ async function loadUnposted(accountNo) {
   try {
     const qs = 'limit=100' + (accountNo ? '&client=' + encodeURIComponent(accountNo) : '');
     const data = await apiFetch('/api/live/unposted?' + qs);
+    if (!getToken()) return;
     if (Array.isArray(data)) {
       unpostedEntries = data;
       renderUnpostedTable();
@@ -2205,7 +2373,7 @@ function toggleBank(el) { el.classList.toggle('selected'); saveChipSelection(); 
 
 const LOG_MESSAGES = [
   'Authenticating with Google OAuth…','✓ Authentication successful',
-  'Scanning Gmail label: Finance/Bank Statements…',
+  'Scanning Gmail label: bank statement to be processed…',
   'Found 3 unprocessed threads in RBC folder…',
   'Downloading RBC-Statement-June2026.pdf (2.1 MB)…',
   '✓ RBC statement parsed: 14 transactions, Jun 1–3 2026',
@@ -2242,19 +2410,18 @@ async function runWatcher() {
 
   const clientSel = document.getElementById('watcher-client-select');
   const clientVal = clientSel?.value && clientSel.value !== 'all' ? clientSel.value : null;
-  const qs = new URLSearchParams();
+  let clientSlug = null;
   if (clientVal) {
     const c = CLIENTS.find(x => String(x.id) === String(clientVal));
-    if (c?.client_id) qs.set('client', c.client_id);
+    clientSlug = c?.client_id || null;
   }
+  const qs = _watcherQueryParams(clientSlug);
 
   try {
-    const result = await apiFetch('/api/ops/run-watcher?' + qs.toString(), { method: 'POST' });
-    (result.lines || []).forEach(line => {
-      const cls = line.startsWith('✓') || /ok|success/i.test(line) ? 'ok'
-                : line.startsWith('⚠') || /error|fail|warn/i.test(line) ? 'warn'
-                : line.startsWith('[') || /info|start|connect/i.test(line) ? 'info' : '';
-      appendLogLine(log, line, cls);
+    document.getElementById('watcher-run-status').textContent = 'Running — streaming log…';
+    const result = await _runWatcherStream('/api/ops/run-watcher?' + qs.toString(), line => {
+      appendLogLine(log, line, _logLineClass(line));
+      log.scrollTop = log.scrollHeight;
     });
     if (result.ok) {
       btn.textContent = '✓ Complete';
@@ -2332,12 +2499,12 @@ async function quickRunWatcher() {
   }
   showToast('Running Gmail Watcher for ' + currentClient.name + '…', 'info');
   try {
-    const qs = new URLSearchParams();
-    if (currentClient.client_id) qs.set('client', currentClient.client_id);
-    const result = await apiFetch('/api/ops/run-watcher?' + qs.toString(), { method: 'POST' });
+    const qs = _watcherQueryParams(currentClient.client_id || null);
+    const result = await _runWatcherStream('/api/ops/run-watcher?' + qs.toString(), () => {});
     if (result.ok) {
       showToast('Watcher complete for ' + currentClient.name, 'success');
-      fetchLiveForAccount(currentClient?.client_id, currentPeriod); loadUnposted(currentClient?.client_id);
+      fetchLiveForAccount(currentClient?.account_masked || currentClient?.client_id, currentPeriod);
+      loadUnposted(currentClient?.account_masked || currentClient?.client_id);
     } else {
       showToast('Watcher finished with warnings — check Gmail Watcher view', 'warning');
     }
@@ -2346,6 +2513,60 @@ async function quickRunWatcher() {
   }
 }
 function loadFromFolder() { showToast('Opening Google Drive folder picker…', 'info'); }
+
+async function uploadStatement(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';  // reset so same file can be re-selected
+
+  // Determine client_id from the current watcher client selector
+  const sel = document.getElementById('watcher-client-select');
+  const clientId = (sel && sel.value && sel.value !== 'all') ? sel.value : (CURRENT_CLIENT || '');
+  if (!clientId) { showToast('Select a client first', 'warning'); return; }
+
+  appendWatcherLog(`[AcumenAI] Uploading ${file.name} for ${clientId}…`, 'info');
+
+  const form = new FormData();
+  form.append('client_id', clientId);
+  form.append('file', file);
+  form.append('dry_run', 'false');
+  if (currentPeriod) form.append('period', currentPeriod);
+
+  try {
+    const token = getToken();
+    const resp = await fetch('/api/ops/upload-statement', {
+      method: 'POST',
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+      body: form,
+    });
+    const data = await resp.json();
+
+    if (!data.ok) {
+      appendWatcherLog(`[ERROR] ${data.error || 'Upload failed'}`, 'warn');
+      if (data.raw_preview) {
+        appendWatcherLog('[RAW PREVIEW] ' + data.raw_preview.slice(0, 600), 'warn');
+      }
+      showToast('Upload failed — see Detection Log', 'error');
+    } else {
+      appendWatcherLog(`[OK] ${file.name} → ${data.transactions} txns via ${data.method}`, 'info');
+      appendWatcherLog(`Auto: ${data.booked}  |  Needs review: ${data.review}`, 'info');
+      showToast(`${data.transactions} transactions loaded — ${data.review} need review`, 'success');
+      const acct = CLIENTS.find(c => c.client_id === clientId)?.account_masked || clientId;
+      setTimeout(() => fetchLiveForAccount(acct), 1500);
+    }
+  } catch (err) {
+    appendWatcherLog(`[ERROR] ${err.message}`, 'warn');
+    showToast('Upload error', 'error');
+  }
+}
+
+function appendWatcherLog(msg, cls) {
+  const logWrap = document.getElementById('watcher-log-wrap');
+  const log     = document.getElementById('watcher-log');
+  if (!log) return;
+  if (logWrap) logWrap.style.display = 'block';
+  appendLogLine(log, msg, cls || '');
+}
 
 // ════════════════════════════════════════ HST CHART
 function renderHSTChart() {
@@ -2386,6 +2607,7 @@ async function fetchLiveHST(period) {
   updatePeriodNotes(); // Refresh deadline / period labels regardless of data
   try {
     const rows = await apiFetch('/api/live/hst?period=' + encodeURIComponent(period));
+    if (!getToken()) return;
     if (Array.isArray(rows)) {
       _liveHSTRows = rows;
       // Compute totals for KPI cards
@@ -2505,6 +2727,7 @@ async function loadPostRequests() {
     const acctParam = (c.account_masked || c.acct)
       ? '?account_no=' + encodeURIComponent(c.account_masked || c.acct) : '';
     const data = await apiFetch('/api/ops/post-requests' + acctParam);
+    if (!getToken()) return;
     syncSageBadge(Array.isArray(data) && data[0] ? (data[0].completed_at || data[0].requested_at) : null);
     const tbody = document.getElementById('sage-history');
     if (!tbody || !Array.isArray(data)) return;
@@ -2764,6 +2987,8 @@ async function submitOnboarding(e) {
   const bank         = document.getElementById('ob-bank')?.value || '';
   const MONTH_NUM    = {January:1,February:2,March:3,April:4,May:5,June:6,July:7,August:8,September:9,October:10,November:11,December:12};
   const yearEndMonth = MONTH_NUM[document.getElementById('ob-year-end')?.value] || 12;
+  const glFileInput  = document.getElementById('ob-gl-file');
+  const coaFileInput = document.getElementById('ob-coa-file');
 
   // No quiet defaults: a blank GL silently becoming "1060" is the exact
   // incident class behind the Theotherapy mis-posting.
@@ -2779,26 +3004,40 @@ async function submitOnboarding(e) {
     showToast('Sign in with your access key to onboard clients', 'warning');
     return;
   }
+
+  // Build multipart FormData so GL/COA files can be attached
+  const fd = new FormData();
+  fd.append('company_name',    companyName);
+  fd.append('client_id',       clientId);
+  fd.append('account_no',      accountNo);
+  fd.append('bank',            bank);
+  fd.append('gl_bank_account', glBankAcct);
+  fd.append('sender_email',    senderEmail);
+  fd.append('year_end_month',  String(yearEndMonth));
+  fd.append('sai_folder',      saiFolder);
+  fd.append('industry',        industry);
+  if (glFileInput?.files?.length)  fd.append('gl_file',  glFileInput.files[0]);
+  if (coaFileInput?.files?.length) fd.append('coa_file', coaFileInput.files[0]);
+
   try {
-    const qs = new URLSearchParams({
-      company_name: companyName,
-      client_id:    clientId,
-      account_no:   accountNo,
-      bank,
-      gl_bank_account: glBankAcct,
-      sender_email: senderEmail,
-      year_end_month: String(yearEndMonth),
-      sai_folder: saiFolder,
-      industry,
+    // Send multipart — do NOT set Content-Type (browser sets it with boundary)
+    const token = getToken();
+    const resp  = await fetch('/api/ops/onboard-client', {
+      method: 'POST',
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+      body: fd,
     });
-    const result = await apiFetch('/api/ops/onboard-client?' + qs.toString(), { method: 'POST' });
+    const result = await resp.json();
     closeOnboarding();
     if (result.ok) {
-      showToast('Client "' + companyName + '" onboarded — copy the registry row from the response into R:\\bookkeeping\\client_accounts.csv', 'success');
-      if (result.row) console.log('Registry row to mirror:', result.row);
+      const hasFiles = result.has_gl_file || result.has_coa_file;
+      const fileNote = hasFiles
+        ? ' GL/COA files uploaded — run  onboarding_agent.py --once  on the bookkeeping machine to build the ruleset.'
+        : ' Run  onboarding_agent.py --once  on the bookkeeping machine to complete registration.';
+      showToast('Client "' + companyName + '" queued.' + fileNote, 'success');
       fetchLiveForAccount(null, null);
     } else {
-      showToast(result.error || 'Onboarding error', 'warning');
+      showToast(result.detail || result.error || 'Onboarding error', 'warning');
     }
   } catch (err) {
     closeOnboarding();

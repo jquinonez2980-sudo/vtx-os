@@ -28,6 +28,31 @@ from typing import Any
 CREDENTIAL_SECRET = "vtx-gmail-oauth-credentials"
 FROM_EMAIL = "jquinonez2980@gmail.com"
 _DEFAULT_QUERY = "is:unread has:attachment (filename:pdf OR filename:csv) in:inbox"
+
+
+_REPROCESS_QUERY = (
+    "has:attachment (filename:pdf OR filename:csv) in:inbox"
+)
+
+
+def build_poll_query(
+    label: str | None = None,
+    lookback_days: int | None = None,
+    base: str = _DEFAULT_QUERY,
+    *,
+    reprocess: bool = False,
+    from_email: str | None = None,
+) -> str:
+    """Compose a Gmail search query for bank-statement polling."""
+    q = _REPROCESS_QUERY if reprocess else base
+    if lookback_days and lookback_days > 0:
+        q += f" newer_than:{lookback_days}d"
+    if label and label.strip():
+        # Gmail search uses hyphens for spaces in label names; quotes don't work
+        q += " label:" + label.strip().replace(" ", "-")
+    if from_email and from_email.strip():
+        q += f" from:{from_email.strip()}"
+    return q
 _SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.modify",
